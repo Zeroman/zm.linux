@@ -1,0 +1,27 @@
+#!/bin/sh -e
+
+PREREQS=""
+
+prereqs() { echo "$PREREQS"; }
+
+case "$1" in
+    prereqs)
+    prereqs
+    exit 0
+    ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+copy_exec /usr/bin/rsync /bin
+copy_exec /sbin/fsck /bin
+copy_exec /sbin/fsck.ext2 /bin
+copy_exec /sbin/fsck.ext3 /bin
+copy_exec /sbin/fsck.ext4 /bin
+copy_exec /sbin/fsck.vfat /bin
+# copy_exec /sbin/mount.aufs /bin
+# if [ -e /usr/bin/pigz ];then
+    # copy_exec /usr/bin/pigz /bin
+# fi
+# if [ -e /usr/bin/plzip ];then
+    # copy_exec /usr/bin/plzip /bin
+# fi
