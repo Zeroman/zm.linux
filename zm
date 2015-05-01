@@ -312,7 +312,9 @@ boot_log()
 
 update_grub_config()
 {
-    gen_default_grub_config /dev/disk/by-label/sfsroot
+    sfsroot_dev=$(mount | grep -w /media/sfsroot | awk '{print $1}')
+    select_continue "update grub on $sfsroot_dev"
+    gen_default_grub_config $sfsroot_dev
 }
 
 defalut_install_dir()
@@ -1244,7 +1246,7 @@ zm_config()
                 ;;
             --keep-build|-k) zm_argv_del $1;shift; keep_build_dir="yes";
                 ;;
-            --kernel-params) zm_argv_del $1;shift; kernel_params+=$1; zm_argv_del $1;shift;
+            --kernel-params) zm_argv_del $1;shift; kernel_params+=" $1"; zm_argv_del $1;shift;
                 ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
