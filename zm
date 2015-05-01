@@ -181,7 +181,7 @@ print_env()
     print_line
     debug_var deb_ver
     debug_var deb_arch
-    debug_var zm_save
+    debug_var kernel_params 
     debug_var zm_user
     debug_var zm_user_dir
     debug_var install_dir
@@ -299,6 +299,14 @@ update_label()
     real_label=`e2label $device`
     if [ '$real_label' != '$label' ];then
         e2label $device $label
+    fi
+}
+
+boot_log()
+{
+    debug_file=/run/initramfs/initramfs-debug
+    if [ -e "$debug_file" ];then
+        $EDITOR $debug_file
     fi
 }
 
@@ -587,7 +595,7 @@ gen_initrd()
     vmlinuz=$(readlink -f /vmlinuz)
     kernel_ver=${vmlinuz#/boot/vmlinuz-}
     backup_file $install_dir/${initrd_name}
-    echo "Gen $install_dir/${initrd_name}..."
+    echo "Genarate $install_dir/${initrd_name}..."
     mkinitramfs -d initramfs -o $install_dir/${initrd_name} $kernel_ver
 }
 
@@ -634,11 +642,9 @@ gen_home_sfs()
 update_system()
 {
     need_root
-    print_env
     defalut_install_dir $1
 
-    vmlinuz=$(readlink -f /vmlinuz)
-    kernel_ver=${vmlinuz#/boot/vmlinuz-}
+    print_env
 
     # exec -a zm sh -c ""
     echo "#!/bin/bash
@@ -655,7 +661,7 @@ update_system()
     $build_dir/zm_debconf || true
 
     read sels < $build_dir/dbconf_ret
-    echo $sels
+    # echo $sels
 
     select_continue_debconf
 
@@ -663,12 +669,12 @@ update_system()
     for sel in $sels;do
         case $sel in
             kernel)
+                vmlinuz=$(readlink -f /vmlinuz)
                 backup_file $install_dir/${kernel_name}
-                /bin/cp -f $vmlinuz $install_dir/${kernel_name}
+                /bin/cp -fv $vmlinuz $install_dir/${kernel_name}
                 ;;
             initrd)
-                backup_file $install_dir/${initrd_name}
-                mkinitramfs -d initramfs -o $install_dir/${initrd_name} $kernel_ver
+                gen_initrd $install_dir
                 ;;
             root)
                 backup_file $install_dir/${root_sfs_name}
@@ -818,17 +824,13 @@ gen_default_grub_config()
 {
     grub_device=$1
 
-    other_param=""
     label_suffix=""
     disk_label=$(e2label $grub_device)
     if echo $disk_label | grep sfsroot;then
         label_suffix=${disk_label/sfsroot}
     fi
     if [ ! -z "$label_suffix" ];then
-        other_param="label_suffix=$label_suffix"
-    fi
-    if [ "$zm_save" = "yes" ];then
-        other_param="$other_param zm_save=yes"
+        kernel_params+=" label_suffix=$label_suffix"
     fi
 
     boot_uuid=$(blkid -s UUID $grub_device | awk -F= '{print $2}' | tr -d '"')
@@ -840,7 +842,7 @@ menuentry 'ZM linux $zm_user ($deb_arch)' --class=submenu --class debian {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
     echo 'Loading $deb_arch kernel...'
-    linux $temp_path/${kernel_name} sfs_part=UUID=\$root_uuid $other_param 
+    linux $temp_path/${kernel_name} sfs_part=UUID=\$root_uuid $kernel_params 
     echo 'Loading $deb_arch initrd...'
     initrd $temp_path/${initrd_name}
 }" > $temp_dir/boot/grub/config/default.cfg
@@ -1242,7 +1244,7 @@ zm_config()
                 ;;
             --keep-build|-k) zm_argv_del $1;shift; keep_build_dir="yes";
                 ;;
-            --zm-save) zm_argv_del $1;shift; zm_save="yes";
+            --kernel-params) zm_argv_del $1;shift; kernel_params+=$1; zm_argv_del $1;shift;
                 ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
@@ -1402,9 +1404,9 @@ zm_init()
     home_sfs_name="home.sfs"
     initrd_name="initrd.img"
     kernel_name="vmlinuz"
+    kernel_params="quiet"
 
     sfs_dir=""
-    zm_save="no"
     zm_user=""
     zm_user_dir=""
 

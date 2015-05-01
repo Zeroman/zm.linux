@@ -1,6 +1,4 @@
 #!/bin/sh 
-# set -e
-# set -x
 
 case "${1}" in
     prereqs)
@@ -23,7 +21,6 @@ label_suffix=""
 root_sfs=""
 home_sfs=""
 sfs_in_mem=false
-zm_debug=false
 sfs_show=false
 aufs_show=true
 swap_size=0
@@ -55,6 +52,13 @@ root_mpath=/
 home_mpath=/home
 work_mpath=/work
 backup_mpath=/media/backup
+
+home_mounted=false
+work_mounted=false
+backup_mounted=false
+aufs_part_mounted=false
+aufs_root_mounted=false
+aufs_home_mounted=false
 
 aufs_file_suffix="tar.gz"
 aufs_max_branch=8
@@ -95,19 +99,21 @@ err_exit()
     panic $@
 }
 
-select_continue()
+print_msg()
 {
-    echo "$@"
-    echo "Continue? y/n"
-    read c 
-    if [ $c !=  "y" ];then
-        err_exit "Select no and exit now."
-    fi
+    echo $@ > /dev/console
+}
+
+goto_shell()
+{
+    print_msg "Prees ctrl + d to continue."
+    PS1='[zm:initramfs] ' /bin/sh -i </dev/console >/dev/console 2>&1
+    true
 }
 
 get_filesize_mb()
 {
-    test -e $1 || err_exit "$1 is no exist!"
+    test -e "$1" || err_exit "$1 is no exist!"
     fileSizeB=`stat -c %s $1`
     fileSizeKB=`expr $fileSizeB / 1024`
     fileSizeMB=`expr $fileSizeKB / 1024`
@@ -183,15 +189,26 @@ decompress_file()
     fi
 }
 
-mount_partition()
+mount_storage()
 {
-    partiton=$1
+    mount_src=$1
     mount_point=$2
-    if [ -b $partiton ];then
-        mkdir -p $mount_point
-        checkfs $partiton $mount_point
-        mount $partiton $mount_point
+    if [ -b "$mount_src" ];then
+        print_msg "Check filesystem on $mount_src ..."
+        checkfs $mount_src $mount_point
     fi
+    print_msg "Mounting $mount_src on $mount_point ..."
+    mkdir -p $mount_point
+    mount $mount_src $mount_point || err_exit "mount $@ error"
+}
+
+mount_move()
+{
+    old_mpath=$1
+    new_mpath=$2/$1
+
+    mkdir -p $new_mpath
+    mount -n -o move $old_mpath $new_mpath || err_exit "mount move $old_mpath $new_mpath error"
 }
 
 init_params()
@@ -243,10 +260,8 @@ init_params()
             sfs_in_mem)
                 sfs_in_mem=true
                 ;;
-            zm_debug)
-                zm_debug=true
+            debug)
                 set -x
-                set -e
                 ;;
         esac
     done
@@ -354,32 +369,28 @@ init_sfs()
         err_exit "no sfs partiton"
     fi
 
-    mkdir -p $sfs_part_mpath
-    echo "Mounting $sfs_part on $sfs_part_mpath ..." > /dev/console
-    mount_partition $sfs_part $sfs_part_mpath
-    mount | grep $sfs_part_mpath || err_exit "mount $sfs_part error"
+    mount_storage $sfs_part $sfs_part_mpath
 
-    mkdir -p $sfs_ram_mpath
+    root_file=$(readlink -f $sfs_part_mpath/${root_sfs} || true)
+    home_file=$(readlink -f $sfs_part_mpath/${home_sfs} || true)
+    aufs_root_file=$(readlink -f $sfs_part_mpath/rootaufs.${aufs_file_suffix} || true)
+    aufs_home_file=$(readlink -f $sfs_part_mpath/homeaufs.${aufs_file_suffix} || true)
 
-    root_file=$sfs_part_mpath/${root_sfs}
-    home_file=$sfs_part_mpath/${home_sfs}
-    aufs_root_file=$sfs_part_mpath/rootaufs.${aufs_file_suffix}
-    aufs_home_file=$sfs_part_mpath/homeaufs.${aufs_file_suffix}
-
-    test -e $root_file || err_exit "Not found root sfs file!"
+    test -e "$root_file" || err_exit "Not found root sfs file!"
 
     if $sfs_in_mem;then
-        root_fileSizeMB=`get_filesize_mb $root_file`
+        mkdir -p $sfs_ram_mpath
+        root_fileSizeMB=$(get_filesize_mb $root_file)
 
         ramsfsSizeMB=$root_fileSizeMB
-        if [ -e $home_file ];then
-            home_fileSizeMB=`get_filesize_mb $home_file`
-            ramsfsSizeMB=`expr $ramsfsSizeMB + $home_fileSizeMB`
+        if [ -e "$home_file" ];then
+            home_fileSizeMB=$(get_filesize_mb "$home_file")
+            ramsfsSizeMB=$(expr $ramsfsSizeMB + $home_fileSizeMB)
         fi
-        ramsfsSizeMB=`expr $ramsfsSizeMB + 2`
+        ramsfsSizeMB=$(expr $ramsfsSizeMB + 2)
 
-        res_mem_size=`get_mem_freesize_mb`
-        res_mem_size=`expr $res_mem_size / 2`
+        res_mem_size=$(get_mem_freesize_mb)
+        res_mem_size=$(expr $res_mem_size / 2)
 
         if [ $res_mem_size -gt $ramsfsSizeMB ];then
             #mount -t tmpfs -o mode=755,size=${ramsfsSizeMB}m tmpfs $sfs_ram_mpath
@@ -388,7 +399,7 @@ init_sfs()
             rsync -rhP $root_file $sfs_ram_mpath > /dev/console
             root_file=$sfs_ram_mpath/$(basename $root_sfs)
 
-            if [ -e $home_file ];then
+            if [ -e "$home_file" ];then
                 rsync -rhP $home_file $sfs_ram_mpath > /dev/console
                 home_file=$sfs_ram_mpath/$(basename $home_sfs)
             fi
@@ -397,19 +408,29 @@ init_sfs()
         fi
     fi
 
+    if [ -b "$work_part" ];then
+        mount_storage $work_part $work_mpath && work_mounted=true
+    fi
+    if [ -b "$backup_part" ];then
+        mount_storage $backup_part $backup_mpath && backup_mounted=true
+    fi
+
     if [ -b $aufs_part ];then
         mkdir -p $aufs_mpath
-        mount_partition $aufs_part $aufs_mpath
+        mount_storage $aufs_part $aufs_mpath && aufs_part_mounted=true
         aufs_root_mpath=$aufs_mpath/aufs/root
         aufs_home_mpath=$aufs_mpath/aufs/home
+        mkdir -p -m 0755 $aufs_root_mpath
+        mkdir -p -m 0755 $aufs_home_mpath
     else
         if [ "$zm_save" = "yes" -o $(get_mem_freesize_mb) -lt $aufs_min_size ];then
             aufs_path=$(get_freesize_path $aufs_min_size $sfs_part_mpath)
             test -z "$aufs_path" && err_exit "Can't get aufs space."
 
-            aufs_part=$sfs_part
             aufs_root_mpath=$aufs_path/aufs/root
             aufs_home_mpath=$aufs_path/aufs/home
+            mkdir -p -m 0755 $aufs_root_mpath
+            mkdir -p -m 0755 $aufs_home_mpath
             if [ $zm_save != "yes" ];then
                 touch ${aufs_root_mpath}/$aufs_clean_file_name
                 touch ${aufs_home_mpath}/$aufs_clean_file_name
@@ -420,129 +441,81 @@ init_sfs()
 
 mount_root()
 {
-    test -e $root_file || err_exit "$root_file is not found!"
+    test -e "$root_file" || err_exit "$root_file is not found!"
 
     if [ -z "$aufs_root_mpath" ];then
         test $root_mem_size -gt $aufs_min_size || err_exit "root_mem_size less len aufs_min_size"
         aufs_root_mpath=$aufs_mpath/root
         mkdir -p -m 0755 $aufs_root_mpath
-        mount -t tmpfs -o mode=755,size=${root_mem_size}m none $aufs_root_mpath
+        mount -t tmpfs -o mode=755,size=${root_mem_size}m none $aufs_root_mpath && aufs_root_mounted=true
     fi
 
-    if [ -e ${aufs_root_mpath}/$aufs_clean_file_name ];then
+    if [ -e "${aufs_root_mpath}/$aufs_clean_file_name" ];then
         rm -rf ${aufs_root_mpath}/.*
     fi
 
-    if [ -e $aufs_root_file ];then
+    if [ -e "$aufs_root_file" ];then
         decompress_file $aufs_root_file $aufs_root_mpath
     fi
 
+    mount_storage $root_file $sfs_root_mpath
     mount -t aufs -o br:$aufs_root_mpath none ${new_root}/$root_mpath
-    mkdir -p $sfs_root_mpath
-    mount $root_file $sfs_root_mpath
     mount -t aufs -o remount,udba=none,append:${sfs_root_mpath}=ro none ${new_root}/$root_mpath
     for branch in $(seq 1 $aufs_max_branch)
     do
-        if [ -e ${root_file}.${branch} ];then
-            mkdir -p ${sfs_root_mpath}.${branch}
-            mount ${root_file}.${branch} ${sfs_root_mpath}.${branch}
+        if [ -e "${root_file}.${branch}" ];then
+            mount_storage ${root_file}.${branch} ${sfs_root_mpath}.${branch}
             mount -t aufs -o remount,udba=none,add:1:${sfs_root_mpath}.${branch}=ro+wh none ${new_root}/$root_mpath
             continue
         fi
         break
     done
 
-    if $aufs_show;then
-        mkdir -p ${new_root}/$aufs_root_mpath
-        mount -n -o move $aufs_root_mpath ${new_root}/$aufs_root_mpath
-    fi
-
-    if $sfs_show;then
-        mkdir -p ${new_root}/$sfs_root_mpath
-        mount -n -o move $sfs_root_mpath ${new_root}/$sfs_root_mpath
-        for branch in $(seq 1 $aufs_max_branch)
-        do
-            if [ -e ${root_file}.${branch} ];then
-                mkdir -p ${new_root}/${sfs_root_mpath}.${branch}
-                mount -n -o move ${sfs_root_mpath}.${branch} ${new_root}/${sfs_root_mpath}.${branch}
-                continue
-            fi
-            break
-        done
-    fi
 
 }
 
 mount_home()
 {
-    mkdir -p ${new_root}/$home_mpath
 
-    test -b "$home_part" && mount_partition $home_part ${new_root}/$home_mpath && return
-    test -e "$home_file" || select_continue "$home_file is not found, maybe start with error." && return
+    if [ -b "$home_part" ];then
+        mount_storage $home_part $home_mpath && home_mounted=true
+        return
+    fi
+
+    if [ ! -e "$home_file" ];then
+        goto_shell "$home_file is not found, maybe start with error, please check again." 
+    fi
 
     if [ -z "$aufs_home_mpath" ];then
         test $home_mem_size -gt $aufs_min_size || err_exit "home_mem_size less then aufs_min_size"
         aufs_home_mpath=$aufs_mpath/home
         mkdir -p -m 0755 $aufs_home_mpath
-        mount -t tmpfs -o mode=755,size=${home_mem_size}m none $aufs_home_mpath
+        mount -t tmpfs -o mode=755,size=${home_mem_size}m none $aufs_home_mpath && aufs_home_mounted=true
     fi
 
-    if [ -e ${aufs_home_mpath}/$aufs_clean_file_name ];then
+    if [ -e "${aufs_home_mpath}/$aufs_clean_file_name" ];then
         # shopt -s dotglob
         rm -rf $aufs_home_mpath/.*
         # shopt -u dotglob
     fi
 
-    if [ -e $aufs_home_file ];then
+    if [ -e "$aufs_home_file" ];then
         decompress_file $aufs_home_file $aufs_home_mpath
     fi
 
-    mount -t aufs -o br:$aufs_home_mpath none ${new_root}/$home_mpath
-    mkdir -p $sfs_home_mpath
-    mount $home_file $sfs_home_mpath
-    mount -t aufs -o remount,udba=none,append:${sfs_home_mpath}=ro none ${new_root}/$home_mpath
+    mount_storage $home_file $sfs_home_mpath
+    mkdir -p $home_mpath
+    mount -t aufs -o br:$aufs_home_mpath none $home_mpath
+    mount -t aufs -o remount,udba=none,append:${sfs_home_mpath}=ro none $home_mpath && home_mounted=true
     for branch in $(seq 1 $aufs_max_branch)
     do
-        if [ -e ${home_file}.${branch} ];then
-            mkdir -p ${sfs_home_mpath}.${branch}
-            mount ${home_file}.${branch} ${sfs_home_mpath}.${branch}
-            mount -t aufs -o remount,udba=none,add:1:${sfs_home_mpath}.${branch}=ro+wh none ${new_root}/$home_mpath
+        if [ -e "${home_file}.${branch}" ];then
+            mount_storage ${home_file}.${branch} ${sfs_home_mpath}.${branch}
+            mount -t aufs -o remount,udba=none,add:1:${sfs_home_mpath}.${branch}=ro+wh none $home_mpath
             continue
         fi
         break
     done
-
-    if $aufs_show;then
-        mkdir -p ${new_root}/$aufs_home_mpath
-        mount -n -o move $aufs_home_mpath ${new_root}/$aufs_home_mpath
-    fi
-
-    if $sfs_show;then
-        mkdir -p ${new_root}/$sfs_home_mpath
-        mount -n -o move $sfs_home_mpath ${new_root}/$sfs_home_mpath
-        for branch in $(seq 1 $aufs_max_branch)
-        do
-            if [ -e ${home_file}.${branch} ];then
-                mkdir -p ${new_root}/${sfs_home_mpath}.${branch}
-                mount -n -o move ${sfs_home_mpath}.${branch} ${new_root}/${sfs_home_mpath}.${branch}
-                continue
-            fi
-            break
-        done
-    fi
-}
-
-mount_work()
-{
-    mount_partition $work_part ${new_root}/$work_mpath
-    if [ -d ${new_root}/$work_mpath/cache/archives/ -a -d ${new_root}/var/cache/apt/archives ];then
-        mount --bind ${new_root}/$work_mpath/cache/archives ${new_root}/var/cache/apt/archives
-    fi
-}
-
-mount_backup()
-{
-    mount_partition $backup_part ${new_root}/$backup_mpath
 }
 
 mount_swap()
@@ -555,9 +528,9 @@ mount_swap()
         swapon LABEL=swap$label_suffix
     else
         temp_size=$(expr $swap_size + 512)
-        swap_path=$(get_freesize_path "$temp_size" ${new_root}/$sfs_part_mpath ${new_root}/$work_mpath ${new_root}/$backup_mpath)
+        swap_path=$(get_freesize_path "$temp_size" $sfs_part_mpath $work_mpath $backup_mpath)
         if [ -n "$swap_path" ];then
-            if [ -e $swap_path/swap.img ];then
+            if [ -e "$swap_path/swap.img" ];then
                 temp_size=$(get_filesize_mb $swap_path/swap.img)
                 temp_size=$(expr $temp_size + 512)
                 if [ "$temp_size" -lt "$swap_size" ];then 
@@ -573,41 +546,63 @@ mount_swap()
     fi
 }
 
-move_sfs()
+move_to_newroot()
 {
     if $sfs_in_mem;then
-        mkdir -p ${new_root}/$sfs_ram_mpath
-        mount -n -o move $sfs_ram_mpath ${new_root}/$sfs_ram_mpath
+        mount_move $sfs_ram_mpath ${new_root}
         umount $sfs_part_mpath
     else
-        mkdir -p ${new_root}/$sfs_part_mpath
-        mount -n -o move $sfs_part_mpath ${new_root}/$sfs_part_mpath
+        mount_move $sfs_part_mpath ${new_root}
     fi
 
-    if [ -b $aufs_part ];then
-        mkdir -p ${new_root}/$aufs_mpath
-        mount -n -o move $aufs_mpath ${new_root}/$aufs_mpath
+    $home_mounted && mount_move $home_mpath ${new_root}
+    $work_mounted && mount_move $work_mpath ${new_root}
+    $backup_mounted && mount_move $backup_mpath ${new_root}
+    $aufs_part_mounted && mount_move $aufs_mpath ${new_root}
+
+    if $aufs_show;then
+        $aufs_root_mounted && mount_move $aufs_root_mpath ${new_root}
+        $aufs_home_mounted && mount_move $aufs_home_mpath ${new_root}
+    fi
+
+    if $sfs_show;then
+        mount_move $sfs_root_mpath ${new_root}
+        for branch in $(seq 1 $aufs_max_branch)
+        do
+            if [ -e "${root_file}.${branch}" ];then
+                mount_move ${sfs_root_mpath}.${branch} ${new_root}
+                continue
+            fi
+            break
+        done
+
+        mount_move $sfs_home_mpath ${new_root}
+        for branch in $(seq 1 $aufs_max_branch)
+        do
+            if [ -e "${home_file}.${branch}" ];then
+                mount_move ${sfs_home_mpath}.${branch} ${new_root}
+                continue
+            fi
+            break
+        done
     fi
 }
 
+mount_archives()
+{
+    if [ -d ${new_root}/var/cache/apt/archives ];then
+        mkdir -p ${new_root}/$work_mpath/cache/archives/
+        mount --bind ${new_root}/$work_mpath/cache/archives ${new_root}/var/cache/apt/archives
+    fi
+}
 
 umask 0077
 init_params
 init_sfs
 mount_root
-mount_work
-mount_backup
 mount_home
-move_sfs
 mount_swap
+move_to_newroot
+mount_archives
 umask 0022
 
-if $zm_debug;then
-    set +x
-    set +e
-    print_param_info
-    read choice
-    if [ "$choice" != "y" ];then
-        PS1='[zm:initramfs] ' /bin/sh -i </dev/console >/dev/console 2>&1
-    fi
-fi
