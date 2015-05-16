@@ -148,8 +148,8 @@ mbak()
     bak_root_dir=$zm_backup_dir/$bak_name
     bak_aufs_dir=$zm_backup_mpath/aufs/$bak_name
     bak_zm_sfs_dir=$zm_sfs_dir/$bak_name
-    if [ -d $bak_root_dir ];then
-        $_SUDO rmdir $bak_root_dir
+    if ! readlink -e $bak_root_dir;then
+        $_SUDO rmdir $bak_root_dir > /dev/null 2>&1
     fi
     if [ ! -e $bak_root_dir ];then
         $_SUDO mkdir -m 700 -p $bak_root_dir

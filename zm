@@ -23,7 +23,7 @@ aufs_clean_file_name=.aufs.clean
 
 err()
 {   
-    echo "Error: $*"
+    echo "Error: $@"
     exit 1
 }
 
@@ -48,11 +48,21 @@ backup_file()
 
 download_file()
 {
+    src=$1
+    dst=$2
+    md5=$3
     DL="wget -c"
+
     if which axel;then
-        axel $1 -o $2
+        if [ ! -e "$2" ];then
+            axel $1 -o $2
+        fi
     else
         wget -c $1 -O $2
+    fi
+
+    if [ -n "$md5" ];then
+        echo "$md5 $dst" | md5sum -c 
     fi
 }
 
@@ -127,7 +137,6 @@ usage ()
     add_help "--install-system device" "install system on device, device like /dev/sda1"
     add_help "--arch arch" "system arch, value: i386|amd64"
     add_help "--deb-ver" "debian version, value: stable|testing|unstable"
-    add_help "--gen-basesystem [output_dir]" "generate base system by debootstrap"
     add_help "--gen-initrd [output_dir]" "generate initrd.img"
     add_help "--gen-iso-system iso_file_path" "install system to iso file"
     add_help "--build-dir dir" "build temp dir"
@@ -237,6 +246,20 @@ check_binary()
     fi
 }
 
+rm_safe()
+{
+    dir=$1
+
+    if [ ! -d "$dir" ];then
+        return
+    fi
+
+    if [ $(get_usedsize_dir_mb "$dir") -gt 100 ];then
+        select_continue "Directory($dir) have more data, please check again."
+    fi
+    rm -rf "$dir"
+}
+
 check_removeable_device()
 {
     device=$1
@@ -267,20 +290,26 @@ check_mount()
 
 mount_device()
 {
-    $SUDO mount $*
+    $SUDO mount $@
     last_param=${!#}
 
     if [ ! -e $build_dir/.mount_devs ];then
         touch $build_dir/.mount_devs
     fi
-    tmpfile=`mktemp`
+
+    if grep "$last_param" $build_dir/.mount_devs > /dev/null;then
+        echo "$last_param have mounted."
+        return
+    fi
+
+    tmpfile=$build_dir/.mount_devs.temp
     (echo "$last_param" | cat - $build_dir/.mount_devs > $tmpfile) && mv $tmpfile $build_dir/.mount_devs
 }
 
 umount_device()
 {
     if [ -e $build_dir/.mount_devs ];then
-        $SUDO sh -c "cat /proc/mounts | grep $1 && umount $1 && sed -i \":^$1$:d\" $build_dir/.mount_devs || true"
+        $SUDO sh -c "cat /proc/mounts | grep $1 > /dev/null && umount $1 && sed -i \":^$1$:d\" $build_dir/.mount_devs || true"
     fi
 }
 
@@ -423,8 +452,8 @@ format_usb_device()
 
     dd if=/dev/zero of=$usb_device bs=512 count=63
     sync;sleep 1;
-    sfdisk -R $usb_device
-    sfdisk -D $usb_device -H 255 -S 63 -C $total_cyln << EOF
+    blockdev --rereadpt $usb_device
+    sfdisk --label dos $usb_device -H 255 -S 63 -C $total_cyln << EOF
 ,$fat_cyln,0xc,*
 ,,0x83,-
 EOF
@@ -438,7 +467,7 @@ EOF
         err "$usb_device is mounted!"
     fi
 
-    sfdisk -R $usb_device
+    blockdev --rereadpt $usb_device
     #  sfdisk -l $usb_device
     part1_dev=${usb_device}1
     part2_dev=${usb_device}2
@@ -548,6 +577,7 @@ zm_chroot()
     mount_device -t devpts -o mode=0620,gid=5,nosuid,noexec devpts $chroot_dir/dev/pts
     mount_device -t tmpfs -o mode=1777,nosuid,nodev shm $chroot_dir/dev/shm
     mount_device -t tmpfs -o nosuid,nodev,mode=0755 run $chroot_dir/run
+    mkdir -p $chroot_dir/run/lock
     if [ -d /work/cache/archives ];then
         mkdir -p $chroot_dir/var/cache/apt/archives
         mount_device --bind /work/cache/archives $chroot_dir/var/cache/apt/archives
@@ -570,40 +600,6 @@ zm_chroot()
     umount_device $chroot_dir/dev
     umount_device $chroot_dir/sys
     umount_device $chroot_dir/proc
-}
-
-gen_basesystem()
-{
-    need_root
-    check_binary debootstrap
-
-    defalut_install_dir "$1" "$sfs_part_mpath/linux/$deb_arch/base"
-
-    print_env
-
-    if [ ! -e $root_dir/bin/sh ];then
-        if [ -d /work/cache/archives ];then
-            mkdir -p $root_dir/var/cache/apt/archives
-            mount_device --bind /work/cache/archives $root_dir/var/cache/apt/archives
-        fi
-        debootstrap --arch $deb_arch ${deb_ver} $root_dir $apt_url/debian
-        if [ -d /work/cache/archives ];then
-            umount_device $chroot_dir/var/cache/apt/archives
-        fi
-    fi
-
-    $CP -v $zm_dir/zm_install_init $root_dir/tmp/
-    $zm_path --zm-user $zm_user --install $root_dir/tmp/ 
-
-    zm_chroot $root_dir "sh /tmp/zm_install_init $deb_arch"
-
-    backup_file $install_dir/${kernel_name}
-    backup_file $install_dir/${initrd_name}
-    backup_file $install_dir/${root_sfs_name}
-    /bin/cp -f $root_dir/vmlinuz $install_dir/${kernel_name} #no links
-    $CP $root_dir/tmp/initrd.img $install_dir/${initrd_name}
-
-    gen_root_sfs $root_dir $install_dir/${root_sfs_name}
 }
 
 gen_kernel()
@@ -866,20 +862,18 @@ create_virtual_disk()
     # qemu-nbd --cache writethrough -c /dev/nbd0 $root_file
     install-mbr --force /dev/nbd0
     install-mbr --force /dev/nbd1
-    sfdisk -D /dev/nbd0 << EOF
+    sfdisk --label dos /dev/nbd0 << EOF
 ,,0x83,*
-,,,-
 EOF
-    sfdisk -D /dev/nbd1 << EOF
+    sfdisk --label dos /dev/nbd1 << EOF
 ,,0x83,*
-,,,-
 EOF
     while [ ! -e /dev/nbd0p1 ];do
-        sfdisk -R /dev/nbd0
+        blockdev --rereadpt /dev/nbd0
         sleep 1
     done
     while [ ! -e /dev/nbd1p1 ];do
-        sfdisk -R /dev/nbd1
+        blockdev --rereadpt /dev/nbd1
         sleep 1
     done
     mkfs.ext4 -L sfsroot /dev/nbd0p1
@@ -898,16 +892,24 @@ EOF
     echo ""
 }
 
+default_zm_setup()
+{
+    echo "change root password..."
+    echo root:'root' | chpasswd
+}
+
 auto_install()
 {
-    mount
+    # export DEBIAN_FRONTEND=Gnome
+    # export DEBIAN_FRONTEND=Noninteractive
+
     install_zm
     install_softs
     zm_user_command zm_setup
     gen_kernel /media/install
     gen_initrd /media/install
     gen_root_sfs / /media/install/${root_sfs_name}
-    gen_home_sfs /home /media/install/${home_sfs_name}
+    # gen_home_sfs /home /media/install/${home_sfs_name}
 
     sync;sync;sync
 }
@@ -926,7 +928,7 @@ make_system()
 
     print_env
 
-    if [ ! -e $root_dir/bin/sh ];then
+    if [ ! -e "$root_dir/bin/sh" ];then
         if [ -d /work/cache/archives ];then
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind /work/cache/archives $root_dir/var/cache/apt/archives
@@ -937,7 +939,6 @@ make_system()
         fi
     fi
 
-    $CP -v $zm_dir/zm_install_init $root_dir/tmp/
     $zm_path --zm-user $zm_user --install $root_dir/tmp/ 
 
     mkdir -p $root_dir/media/install
@@ -998,8 +999,8 @@ install_system()
 add_soft()
 {	
     zm_softs+=" "
-    zm_softs+="$*"
-    # for soft in $* 
+    zm_softs+="$@"
+    # for soft in $@ 
     # do
     # dpkg -s $soft > /dev/null 2>&1 || aptitude install $soft -y
     # done
@@ -1028,7 +1029,7 @@ apt_update()
     fi
 }
 
-_zm_setup_apt()
+default_zm_setup_apt()
 {
     temp_apt_src_file=$build_dir/sources.list
     > $temp_apt_src_file
@@ -1117,9 +1118,10 @@ zm_user_command()
     test -z "$cmd" && return
     if command -v $cmd > /dev/null 2>&1;then
         $cmd $*
+        return
     fi
 
-    def_cmd="_$cmd"
+    def_cmd="default_$cmd"
     test -z "$def_cmd" && return
     if command -v $def_cmd > /dev/null 2>&1;then
         $def_cmd $*
@@ -1128,7 +1130,7 @@ zm_user_command()
 
 zm_add_groups()
 {
-    groups="$*"
+    groups="$@"
     for g in $groups
     do
         if ( grep $g /etc/group > /dev/null; ) && ! ( groups $zm_user | grep $g > /dev/null; );then
@@ -1144,10 +1146,13 @@ install_zm()
         install_dir="/usr/share/zm"
     fi
     mkdir -p $install_dir
-    $CP $zm_dir/{zm,zm_debconf.templates,zm_install_init,common,initramfs,mbak,user} $install_dir
-    if [ "$zm_user" != "root" -a -n "$zm_user_dir" ];then
-        mkdir -p $install_dir/user
-        $CP $zm_user_dir $install_dir/user
+    $CP $zm_dir/{zm,zm_debconf.templates,common,initramfs,mbak,user} $install_dir
+
+    user_install_dir=$(readlink -m $install_dir/user/$zm_user)
+    if [ "$zm_user_dir" != "$user_install_dir" ];then
+        rm_safe $user_install_dir
+        mkdir -p $user_install_dir
+        $CP -fv $zm_user_dir/. $user_install_dir/
     fi
 
     if [ $install_dir = "/usr/share/zm" ];then
@@ -1175,7 +1180,7 @@ zm_setup_tzdata()
     chmod +x $build_dir/zm_debconf
     $CP zm_debconf.templates $build_dir/
     $build_dir/zm_debconf
-    dpkg-reconfigure -u tzdata || true
+    DEBIAN_FRONTEND=Noninteractive dpkg-reconfigure -u tzdata || true
 }
 
 zm_setup_sh()
@@ -1211,7 +1216,7 @@ zm_setup_sh()
 
 zm_setup_default_locales()
 {
-    rm /etc/locale.gen
+    rm -f /etc/locale.gen
 
     echo "#!/bin/bash
     . $zm_dir/common/init_debconf.sh
@@ -1302,12 +1307,14 @@ zm_config()
   sfs_mnt_dir=$build_dir/sfs
   aufs_dir=$build_dir/aufs
   root_dir=$build_dir/root
+  dl_dir=$build_dir/dl
 
   mkdir -p $mnt_dir
   mkdir -p $iso_dir
   mkdir -p $sfs_mnt_dir
   mkdir -p $aufs_dir
   mkdir -p $root_dir
+  mkdir -p $dl_dir
 
   #trap zm_uninit ERR INT QUIT TERM EXIT
   trap zm_uninit ERR INT TERM EXIT
@@ -1334,13 +1341,15 @@ zm_config()
   zm_user_home=$(grep $zm_user /etc/passwd | awk -F:  '{print $6}')
   if [ -z "$zm_user_dir" ];then
       if [ -d $zm_user_home/.zm ];then
-          zm_user_dir=$zm_user_home/.zm/
+          zm_user_dir=$zm_user_home/.zm
       else
           if [ -d $zm_dir/user/$zm_user ];then
               zm_user_dir=$zm_dir/user/$zm_user
           fi
       fi
   fi
+  check_file_exist "$zm_user_dir"
+  zm_user_dir=$(readlink -f $zm_user_dir)
 
   if [ -e $zm_user_dir/config.sh ];then
       source $zm_user_dir/config.sh
@@ -1354,8 +1363,6 @@ zm_excute()
     while [ $# -gt 0 ]; do
         case $1 in
             --install-grub) shift; install_grub $1; test -z "$1" || shift; 
-                ;;
-            --gen-basesystem) shift; gen_basesystem $1; test -z "$1" || shift; 
                 ;;
             --install-system) shift; install_system $1; test -z "$1" || shift; 
                 ;;
@@ -1418,9 +1425,9 @@ zm_init()
     LZ=lzip
     XZ=xz
 
-    which pigz > /dev/null && GZ="pigz -p $cpu_counts"
-    which plzip > /dev/null && LZ="plzip -n $cpu_counts"
-    which pxz > /dev/null && XZ="pxz -T$cpu_counts"
+    which pigz > /dev/null 2>&1 && GZ="pigz -p $cpu_counts"
+    which plzip > /dev/null 2>&1 && LZ="plzip -n $cpu_counts"
+    which pxz > /dev/null 2>&1 && XZ="pxz -T$cpu_counts"
 
 
     root_path=""
@@ -1447,11 +1454,11 @@ zm_init()
 
     # no multimedia
     # apt_url=http://mirrors.163.com
-    # apt_url=http://mirrors.aliyun.com
+    apt_url=http://mirrors.aliyun.com
     # apt_url=http://mirrors.sohu.com
 
     # have multimedia
-    apt_url=http://free.nchc.org.tw
+    # apt_url=http://free.nchc.org.tw
     # apt_url=http://mirrors.ustc.edu.cn
     # apt_url=http://mirrors.xmu.edu.cn
     # apt_url=http://mirror.bjtu.edu.cn
@@ -1500,7 +1507,7 @@ if [ $# -eq 0 -o "$1" = "--help" ];then
     exit 0
 fi
 
-zm_argv=$*
+zm_argv=$@
 zm_clean=true
 zm_debug=false
 

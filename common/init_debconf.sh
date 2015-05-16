@@ -2,7 +2,6 @@
 
 # export LANG=zh_CN.UTF-8
 # export DEBCONF_DEBUG=developer
-export DEBCONF_DEBUG=Gnome
 #Dialog, Readline, Gnome, Kde, Editor, Noninteractive
 # export DEBIAN_FRONTEND=Gnome 
 
