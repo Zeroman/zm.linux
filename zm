@@ -192,7 +192,7 @@ print_env()
 {
     print_line
     debug_var deb_ver
-    debug_var deb_arch
+    debug_var zm_arch
     debug_var kernel_params 
     debug_var zm_user
     debug_var zm_user_dir
@@ -497,13 +497,13 @@ gen_iso_file()
     iso_filename=$1
 
     install_grub_on_dir $iso_dir
-    temp_path=/linux/$deb_arch/${zm_user}
+    temp_path=/linux/$zm_arch/${zm_user}
     echo "
-menuentry \"ZM($deb_arch) (default)\" --class debian {
+menuentry \"ZM($zm_arch) (default)\" --class debian {
 set gfxpayload=keep
 search --no-floppy -l --set=root $iso_label
 echo 'Loading kernel...'
-linux $temp_path/$kernel_name sfs_part=cdrom zm_user=$zm_user zm_arch=$deb_arch
+linux $temp_path/$kernel_name sfs_part=cdrom zm_user=$zm_user zm_arch=$zm_arch
 echo 'Loading initrd...'
 initrd $temp_path/$initrd_name
 }
@@ -764,14 +764,14 @@ gen_default_grub_config()
     boot_uuid=$(blkid -s UUID $grub_device | awk -F= '{print $2}' | tr -d '"')
     temp_dir=$(mktemp -d)
     mount_device $grub_device $temp_dir
-    temp_path=/linux/$deb_arch/${zm_user}
+    temp_path=/linux/$zm_arch/${zm_user}
     echo "
-menuentry 'ZM linux $zm_user ($deb_arch)' --class=submenu --class debian {
+menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
-    echo 'Loading $deb_arch kernel...'
+    echo 'Loading $zm_arch kernel...'
     linux $temp_path/${kernel_name} sfs_part=UUID=\$root_uuid $kernel_params 
-    echo 'Loading $deb_arch initrd...'
+    echo 'Loading $zm_arch initrd...'
     initrd $temp_path/${initrd_name}
 }" > $temp_dir/boot/grub/config/default.cfg
     sed "s/\bzm\b/$zm_user/g" common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
@@ -933,7 +933,7 @@ make_system()
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind /work/cache/archives $root_dir/var/cache/apt/archives
         fi
-        debootstrap --arch $deb_arch ${deb_ver} $root_dir $apt_url/debian
+        debootstrap --arch $zm_arch ${deb_ver} $root_dir $apt_url/debian
         if [ -d /work/cache/archives ];then
             umount_device $root_dir/var/cache/apt/archives
         fi
@@ -944,7 +944,7 @@ make_system()
     mkdir -p $root_dir/media/install
     mount_device --bind $install_dir $root_dir/media/install
 
-    zm_chroot $root_dir "/tmp/zm --zm-user $zm_user --deb-ver $deb_ver --arch $deb_arch auto_install"
+    zm_chroot $root_dir "/tmp/zm --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
 
     umount_device $root_dir/media/install
 }
@@ -970,12 +970,12 @@ install_system()
         mkdir -p $dst_dir
     fi
 
-    temp_dir=$dst_dir/linux/$deb_arch/$zm_user
+    temp_dir=$dst_dir/linux/$zm_arch/$zm_user
     mkdir -p $temp_dir
 
     $CP $sfs_dir/${kernel_name} $temp_dir
     $CP $sfs_dir/${initrd_name} $temp_dir
-    # gen_initrd $dst_dir/linux/$deb_arch/
+    # gen_initrd $dst_dir/linux/$zm_arch/
 
     rsync -avP $root_sfs_file $temp_dir
     rsync -avP $root_sfs_file.[0-9] $temp_dir || true
@@ -1042,7 +1042,7 @@ default_zm_setup_apt()
 
 add_base_softs()
 {
-    case $deb_arch in
+    case $zm_arch in
         amd64)
             kernel_softs="linux-image-amd64 linux-headers-amd64"; 
             ;;
@@ -1261,7 +1261,7 @@ zm_config()
                 ;;
             --sfsdir) zm_argv_del $1;shift; sfs_dir=$1; zm_argv_del $1;shift;
                 ;;
-            --arch) zm_argv_del $1;shift; deb_arch=$1; zm_argv_del $1;shift;
+            --arch) zm_argv_del $1;shift; zm_arch=$1; zm_argv_del $1;shift;
                 ;;
             --apt-url) zm_argv_del $1;shift; apt_url="$1"; zm_argv_del "$1";shift;
                 ;;
@@ -1328,9 +1328,9 @@ zm_config()
   fi
 
   if [ -z "$sfs_dir" ];then
-      sfs_dir=$sfs_part_mpath/linux/$deb_arch
+      sfs_dir=$sfs_part_mpath/linux/$zm_arch
       if [ -d "$sfs_dir/$zm_user" ];then
-          sfs_dir="$sfs_part_mpath/linux/$deb_arch/$zm_user"
+          sfs_dir="$sfs_part_mpath/linux/$zm_arch/$zm_user"
       fi
   fi
   root_sfs_file=$sfs_dir/${root_sfs_name}
@@ -1449,7 +1449,7 @@ zm_init()
 
     # deb_ver=testing
     deb_ver=unstable
-    deb_arch=$(dpkg --print-architecture)
+    zm_arch=$(dpkg --print-architecture)
     aufs_max_branch=8
 
     # no multimedia
