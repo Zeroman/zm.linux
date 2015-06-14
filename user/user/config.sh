@@ -64,6 +64,7 @@ _add_softs_common()
     add_soft texlive-generic-recommended
     add_soft texlive-xetex
     add_soft texinfo
+    add_soft lmodern fonts-lmodern
 
     add_soft vifm
     # add_soft vim-syntax-go vim-syntax-gtk
@@ -76,8 +77,8 @@ _add_softs_common()
     add_soft splint splint-data
     add_soft sloccount
     add_soft gcc g++ gdb gdbserver
-    #add_soft libstdc++6-4.7-doc
-    #add_soft libstdc++6-4.7-dbg
+    add_soft libstdc++-4.9-doc
+    # add_soft libstdc++6-4.9-dbg
     add_soft autoconf automake colormake cmake libtool make 
     add_soft scons scons-doc
     add_soft fakeroot
@@ -103,6 +104,7 @@ _add_softs_common()
     add_soft ttf-wqy-microhei ttf-wqy-zenhei ttf-bitstream-vera xfonts-wqy 
     add_soft fonts-arphic-ukai fonts-arphic-uming
     add_soft fonts-arphic-bkai00mp fonts-arphic-bsmi00lp fonts-arphic-gbsn00lp fonts-arphic-gkai00mp 
+    add_soft fonts-droid
 
     add_soft txt2tags html2text wv tidy
     add_soft doxygen-gui doxygen-latex docbook 
@@ -137,6 +139,9 @@ _add_softs_common()
     add_soft python-tk python3-tk
     add_soft python-gevent #for goagent
 
+    # add_soft wx2.8-doc wx2.8-examples wx2.8-headers wx2.8-i18n python-wxgtk2.8
+    add_soft wx-common
+
     add_soft ruby
 
     add_soft manpages-dev 
@@ -169,10 +174,28 @@ _add_softs_common()
 
     #for windows xrdp
     # add_soft xrdp
+    add_soft xtightvncviewer
 
-    # for coco2d-x
+    # for godot
+    add_soft libssl-dev libasound2-dev
+
+    # for cocos2d-x
     add_soft libx11-dev libxmu-dev libglu1-mesa-dev libgl2ps-dev  
     add_soft libxi-dev libzip-dev libfontconfig1-dev libjbig-dev
+    add_soft xorg-dev libtinyxml2-dev libtiff5-dev libwebsockets-dev
+    add_soft chipmunk-dev libwebp-dev libglew-dev libsqlite3-dev
+    add_soft libgmp-dev libgmpxx4ldbl libgnutlsxx28 libp11-kit-dev libtasn1-6-dev libtasn1-doc nettle-dev
+    add_soft libcurl4-gnutls-dev libgmp-dev libgmpxx4ldbl libgnutls28-dev libgnutlsxx28 libp11-kit-dev libtasn1-6-dev libtasn1-doc nettle-dev
+    add_soft libglfw3-dev
+
+    # for gfw proxy
+    # add_soft docker.io
+    add_soft geoip-bin
+
+    add_soft smplayer
+    add_soft vlc browser-plugin-vlc libvlc-dev
+    add_soft vdpau-va-driver vdpauinfo
+    add_soft nvidia-vdpau-driver mesa-vdpau-drivers 
 }
 
 _add_softs_i386_stable()
@@ -191,17 +214,12 @@ _add_softs_common_unstable()
     # add_soft bashdb
 
     add_soft udisks2 
-    add_soft fonts-lmodern
-    add_soft clang-3.7
+    add_soft clang-3.7 libclang-3.7-dev #for ycp: ./install.sh --system-libclang --clang-completer
 
     add_soft jq #json tools
     add_soft python-termcolor
 
     add_soft ffmpeg 
-    add_soft smplayer
-    add_soft vlc browser-plugin-vlc libvlc-dev
-
-    add_soft compton
 
     add_soft qt4-default 
     # add_soft qt5-default
@@ -210,18 +228,20 @@ _add_softs_common_unstable()
 
 _add_softs_common_i386()
 {
-    true
+    add_soft wine
 }
 
 _add_softs_common_amd64()
 {
+    # add_soft mingw32
     add_soft libjai-core-java libjai-imageio-core-java
 
-    # for mutl arch i386
-    dpkg --add-architecture i386
     #for build android
-    add_soft gcc-multilib libc6-i386  libc6-dev-i386 lib32z1 lib32stdc++-4.9-dev
+    add_soft gcc-multilib g++-multilib
+    add_soft libc6-i386 lib32stdc++6
+    add_soft libc6-dev-i386 lib32z1 #libstdc++-4.9-dev
     add_soft xsltproc zip gperf libswitch-perl
+    add_soft wine32
 }
 
 _add_gui_soft()
@@ -231,6 +251,7 @@ _add_gui_soft()
     # add_soft xserver-xorg-video-qxl
     #add_soft slim 
 
+    add_soft compton
     add_soft openbox
     add_soft obmenu obconf human-icon-theme python-xdg
     add_soft geany gsimplecal grun leafpad gucharmap
@@ -247,11 +268,18 @@ _add_gui_soft()
     add_soft oxygencursors
     add_soft gtk2-engines gtk2-engines-murrine gtk2-engines-wonderland
     add_soft pcmanfm gvfs-backends gvfs-fuse
+    add_soft planner
 
-    # add_soft google-chrome-stable #google-chrome-beta
+    # add_soft xfce4-panel xfce4-cpugraph-plugin xfce4-diskperf-plugin 
+    # add_soft xfce4-sensors-plugin xfce4-battery-plugin
+    # add_soft thunar thunar-volman thunar-archive-plugin 
+
+
+    # add_soft chromium 
     add_soft iceweasel iceweasel-l10n-zh-cn
-    add_soft xul-ext-adblock-plus xul-ext-flashblock xul-ext-downthemall
+    add_soft iceweasel-vimperator xul-ext-adblock-plus xul-ext-flashblock xul-ext-downthemall
     # add_soft openfetion pidgin
+    # add_soft google-chrome-stable #google-chrome-beta
     # add_soft icedove icedove-l10n-zh-cn
     # add_soft icedove-l10n-zh-cn
 
@@ -275,16 +303,53 @@ _add_gui_soft()
     add_soft libqt4-opengl-dev libqtwebkit-dev qt4-designer
     # add_soft qt4-demos 
     add_soft python-qt4
+
+    add_soft khelpcenter4 #for all man,info...
+
+    # for mind map
+    #add_soft vym
 }
 
 
 zm_add_softs() 
 {
     zm_user_command _add_softs_common
-    zm_user_command _add_softs_common_${deb_arch}
+    zm_user_command _add_softs_common_${zm_arch}
     zm_user_command _add_softs_common_${deb_ver}
-    zm_user_command _add_softs_${deb_arch}_${deb_ver}
+    zm_user_command _add_softs_${zm_arch}_${deb_ver}
     zm_user_command _add_gui_soft
+}
+
+_setup_host()
+{
+    if [ -e $zm_user_dir/hosts ];then
+        diff $zm_user_dir/hosts /etc/hosts > /dev/null || $CP $zm_user_dir/hosts /etc/hosts
+    fi
+}
+
+_setup_network()
+{
+    if [ -d $zm_user_dir/system-connections/ ];then
+        $CP $zm_user_dir/system-connections/* /etc/NetworkManager/system-connections/
+    fi
+}
+
+___zm_setup_apt()
+{
+    > /etc/apt/sources.list
+    # apt_url=http://mirrors.ustc.edu.cn
+    apt_url=http://free.nchc.org.tw
+    echo "deb $apt_url/debian $deb_ver main non-free contrib" >> /etc/apt/sources.list
+    echo "deb-src $apt_url/debian $deb_ver main non-free contrib" >> /etc/apt/sources.list
+    echo "deb $apt_url/debian-multimedia $deb_ver main non-free" >> /etc/apt/sources.list
+    echo "deb-src $apt_url/debian-multimedia $deb_ver main non-free" >> /etc/apt/sources.list
+    #squeeze-proposed-updates
+    #cp -fv $zm_user_dir/google-chrome.list /etc/apt/sources.list.d/
+
+    apt-get update
+    apt-get install -y --force-yes deb-multimedia-keyring
+    apt-get update
+
 }
 
 _setup_user()
@@ -343,6 +408,18 @@ _setup_flash()
     # update-pepperflashplugin-nonfree --install
 }
 
+_setup_google_chrome()
+{
+    if dpkg -s google-chrome-stable > /dev/null 2>&1;then
+        return
+    fi
+
+    if [ -e /work/cache/dl/google-chrome-stable_current_amd64.deb ];then
+        dpkg -i /work/cache/dl/google-chrome-stable_current_amd64.deb || true
+        apt-get -y --force-yes -f install
+    fi
+}
+
 zm_setup()
 {
     # no nouveau
@@ -354,9 +431,13 @@ zm_setup()
     zm_setup_tzdata 'Asia' 'Hong_Kong'
 
     _setup_user
+    _setup_host
     _setup_samba
     _setup_service
+    _setup_network
     _setup_flash
+    _setup_google_chrome
+
 }
 
 _setup_tftpd()
