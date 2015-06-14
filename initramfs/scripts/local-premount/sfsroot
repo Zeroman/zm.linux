@@ -518,6 +518,13 @@ mount_home()
     done
 }
 
+swap_file() 
+{
+    chmod 600 $1
+    mkswap $1
+    swapon $1
+}
+
 mount_swap()
 {
     if [ $swap_size = 0 ];then
@@ -527,21 +534,20 @@ mount_swap()
     if [ -b /dev/disk/by-label/swap$label_suffix ];then
         swapon LABEL=swap$label_suffix
     else
+        if [ -e "$swap_path/swap.img" ];then
+            temp_size=$(get_filesize_mb $swap_path/swap.img)
+            temp_size=$(expr $temp_size + 512)
+            if [ "$temp_size" -gt "$swap_size" ];then 
+                swap_file $swap_path/swap.img
+                return
+            fi
+        fi
+
         temp_size=$(expr $swap_size + 512)
         swap_path=$(get_freesize_path "$temp_size" $sfs_part_mpath $work_mpath $backup_mpath)
         if [ -n "$swap_path" ];then
-            if [ -e "$swap_path/swap.img" ];then
-                temp_size=$(get_filesize_mb $swap_path/swap.img)
-                temp_size=$(expr $temp_size + 512)
-                if [ "$temp_size" -lt "$swap_size" ];then 
-                    dd if=/dev/zero of=$swap_path/swap.img bs=1M count=$swap_size
-                fi
-            else
-                dd if=/dev/zero of=$swap_path/swap.img bs=1M count=$swap_size
-            fi
-            chmod 600 $swap_path/swap.img
-            mkswap $swap_path/swap.img
-            swapon $swap_path/swap.img
+            dd if=/dev/zero of=$swap_path/swap.img bs=1M count=$swap_size
+            swap_file $swap_path/swap.img
         fi
     fi
 }

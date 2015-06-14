@@ -145,6 +145,8 @@ usage ()
     add_help "--chroot chroot_options" "like chroot options."
     add_help "--install-softs" "install softs."
     add_help "-m, --make-system [output dir]" "make system"
+    add_help "--kernel-name" "kernel name"
+    add_help "--kernel-ver" "kernel ver"
       
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
@@ -191,6 +193,8 @@ print_line()
 print_env()
 {
     print_line
+    debug_var kernel_name
+    debug_var kernel_ver
     debug_var deb_ver
     debug_var zm_arch
     debug_var kernel_params 
@@ -602,10 +606,30 @@ zm_chroot()
     umount_device $chroot_dir/proc
 }
 
+get_kernel_file()
+{
+    if [ -z "$kernel_ver" ];then
+        vmlinuz=$(readlink -f /vmlinuz)
+    else
+        vmlinuz=${kernel_name}-${kernel_ver}
+    fi
+    echo "$vmlinuz"
+}
+
+get_kernel_ver()
+{
+    ver=$kernel_ver
+    if [ -z "$kernel_ver" ];then
+        vmlinuz=$(get_kernel_file)
+        ver=${vmlinuz#/boot/vmlinuz-}
+    fi
+    echo $ver
+}
+
 gen_kernel()
 {
     defalut_install_dir $1
-    vmlinuz=$(readlink -f /vmlinuz)
+    vmlinuz=$(get_kernel_file)
     backup_file $install_dir/${kernel_name}
     /bin/cp -fv $vmlinuz $install_dir/${kernel_name}
 }
@@ -613,8 +637,7 @@ gen_kernel()
 gen_initrd()
 {
     defalut_install_dir $1
-    vmlinuz=$(readlink -f /vmlinuz)
-    kernel_ver=${vmlinuz#/boot/vmlinuz-}
+    kernel_ver=$(get_kernel_ver)
     backup_file $install_dir/${initrd_name}
     echo "Genarate $install_dir/${initrd_name}..."
     mkinitramfs -d initramfs -o $install_dir/${initrd_name} $kernel_ver
@@ -1023,6 +1046,10 @@ apt_update()
     nc -v -w 3 www.baidu.com -z 80
     mount_apt_cache
 
+    if [ $zm_arch = "amd64" ];then
+        dpkg --add-architecture i386
+    fi
+
     if [ ! -e /tmp/.zm_apt_update ];then
         $APTGET update
         touch /tmp/.zm_apt_update
@@ -1253,7 +1280,9 @@ zm_config()
                 ;;
             --initrd) zm_argv_del $1;shift; initrd_name=$1; zm_argv_del $1;shift; 
                 ;;
-            --kernel) zm_argv_del $1;shift; kernel_name=$1; zm_argv_del $1;shift; 
+            --kernel-name) zm_argv_del $1;shift; kernel_name=$1; zm_argv_del $1;shift; 
+                ;;
+            --kernel-ver) zm_argv_del $1;shift; kernel_ver=$1; zm_argv_del $1;shift; 
                 ;;
             --zm-user) zm_argv_del $1;shift; zm_user=$1; zm_argv_del $1;shift;
                 ;;
@@ -1438,6 +1467,7 @@ zm_init()
     home_sfs_name="home.sfs"
     initrd_name="initrd.img"
     kernel_name="vmlinuz"
+    kernel_ver=""
     kernel_params="quiet"
 
     sfs_dir=""
@@ -1448,7 +1478,11 @@ zm_init()
     keep_build_dir="no"
 
     # deb_ver=testing
-    deb_ver=unstable
+    deb_ver=$(cat /etc/apt/sources.list | awk '{print $3}' | head -1)
+    if [ "$deb_ver" != "stable" -o "$deb_ver" != "unstable" -o "$deb_ver" != "testing" ];then
+        deb_ver="stable"
+    fi
+
     zm_arch=$(dpkg --print-architecture)
     aufs_max_branch=8
 
@@ -1471,6 +1505,7 @@ zm_uninit()
 {
     if $zm_debug;then
         set +x
+        print_env
     fi
     trap - ERR INT TERM EXIT
     if [ -d "$build_dir" ];then

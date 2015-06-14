@@ -1,0 +1,29 @@
+#!/bin/sh -e
+#
+# rc.local
+#
+# This script is executed at the end of each multiuser runlevel.
+# Make sure that the script will "exit 0" on success or any other
+# value on error.
+#
+# In order to enable or disable this script just change the execution
+# bits.
+#
+# By default this script does nothing.
+
+home_part=$(mount | grep -w /home | awk '{print $1}')
+if [ -b $home_part ];then
+    mount -o remount,usrquota,grpquota $home_part /home
+    if [ ! -e /home/aquota.group -o ! -e /home/aquota.user ];then
+        quotacheck -avug
+    fi
+    quotaon -auvg
+fi
+
+if [ -e /work/start.sh ];then
+    sh /work/start.sh &
+fi
+
+rsync --daemon --config=/etc/rsync.conf
+
+exit 0
