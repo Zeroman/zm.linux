@@ -194,6 +194,22 @@ mbak()
     cd $zm_work_dir/$bak_name 
 }
 
+rmbak()
+{
+    if ! __check_bak_env "$1";then
+        return 1
+    fi
+
+    bak_name="$1"
+    bak_sfs=$zm_backup_mpath/${bak_name}.sfs
+
+    if [ ! -e $bak_sfs ];then
+        return 1
+    fi
+    $_SUDO chattr -i $bak_sfs
+    $_SUDO mv ${bak_sfs} ${zm_backup_old_dir}
+}
+
 umbak()
 {
     bak_params=$@
@@ -321,6 +337,7 @@ fi
 case $cur_shell in
     bash)
         complete -F _mbak_complete_bash mbak
+        complete -F _mbak_complete_bash rmbak
         complete -F _umbak_complete_bash umbak
         ;;
     zsh)
