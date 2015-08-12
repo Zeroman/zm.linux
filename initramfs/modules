@@ -11,5 +11,6 @@
 # sd_mod
 squashfs
 aufs
+overlay
 ahci
 libahci

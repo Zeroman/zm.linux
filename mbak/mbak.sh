@@ -9,6 +9,8 @@ zm_backup_dir=/media/bak
 zm_sfs_dir=/media/sfs
 zm_bak_max_branch=5
 
+unionfs_clean_file=.union.fs.clean
+
 __compress_dir_to_sfs()
 {
     src_dir=$1
@@ -36,6 +38,42 @@ __check_bak_env()
     fi
 
     return 0
+}
+
+__mount_with_aufs()
+{
+    sfsname="$1"
+    sfsdir="$2"
+    sfsmountdir=$3
+    upperdir="$4"
+    mountdir="$5"
+
+    $_SUDO test -d "$upperdir" || { echo "upperdir $upperdir is not found!";return 1; }
+    $_SUDO test -d "$mountdir" || { echo "mountdir $mountdir is not found!";return 1; }
+
+    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    $_SUDO test -f "$sfsfile" || { echo "sfsfile $sfsfile is not found!";return 1; }
+
+    if [ -e "${upperdir}/$unionfs_clean_file" ];then
+        $_SUDO rm -rf ${upperdir}/.*
+    fi
+
+    sfsmpath=$sfsmountdir/$sfsname
+
+    $_SUDO mkdir -m 700 -p $sfsmpath
+    $_SUDO mount $sfsfile $sfsmpath
+    $_SUDO mount -t aufs -o br:$upperdir none $mountdir
+    $_SUDO mount -t aufs -o remount,udba=none,append:${sfsmpath}=ro none $mountdir
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        if [ -e "${sfsfile}.${branch}" ];then
+            $_SUDO mkdir -m 700 -p ${sfsmpath}.${branch}
+            $_SUDO mount ${sfsfile}.${branch} ${sfsmpath}.${branch}
+            $_SUDO mount -t aufs -o remount,udba=none,add:1:${sfsmpath}.${branch}=ro+wh none $mountdir
+            continue
+        fi
+        break
+    done
 }
 
 bak()
@@ -155,21 +193,31 @@ mbak()
         $_SUDO mkdir -m 700 -p $bak_root_dir
         $_SUDO mkdir -m 700 -p $bak_aufs_dir
         $_SUDO mkdir -m 700 -p $bak_zm_sfs_dir
-        $_SUDO mount $bak_sfs $bak_zm_sfs_dir
-        $_SUDO mount -t aufs -o br:$bak_aufs_dir:$bak_zm_sfs_dir=ro none $bak_root_dir
 
-        for branch in $(seq 1 $zm_bak_max_branch)
-        do
-            branch_file=${bak_sfs}.${branch}
-            bak_zm_sfs_branch_dir=$zm_sfs_dir/${bak_name}.${branch}
-            if [ -e "$branch_file" ];then
-                $_SUDO mkdir -m 700 -p $bak_zm_sfs_branch_dir
-                $_SUDO mount $branch_file $bak_zm_sfs_branch_dir
-                $_SUDO mount -t aufs -o remount,udba=none,add:1:$bak_zm_sfs_branch_dir=ro+wh none $bak_root_dir
-                continue
-            fi
-            break
-        done
+        __mount_with_aufs $bak_name $zm_backup_mpath $zm_sfs_dir $bak_aufs_dir $bak_root_dir
+        if [ $? != 0 ];then
+            echo "mount aufs error"
+            $_SUDO rmdir $bak_root_dir
+            return 1
+        fi
+
+        if false;then
+            $_SUDO mount $bak_sfs $bak_zm_sfs_dir
+            $_SUDO mount -t aufs -o br:$bak_aufs_dir:$bak_zm_sfs_dir=ro none $bak_root_dir
+
+            for branch in $(seq 1 $zm_bak_max_branch)
+            do
+                branch_file=${bak_sfs}.${branch}
+                bak_zm_sfs_branch_dir=$zm_sfs_dir/${bak_name}.${branch}
+                if [ -e "$branch_file" ];then
+                    $_SUDO mkdir -m 700 -p $bak_zm_sfs_branch_dir
+                    $_SUDO mount $branch_file $bak_zm_sfs_branch_dir
+                    $_SUDO mount -t aufs -o remount,udba=none,add:1:$bak_zm_sfs_branch_dir=ro+wh none $bak_root_dir
+                    continue
+                fi
+                break
+            done
+        fi
 
         $_SUDO chown $UID $bak_aufs_dir
         $_SUDO chown $UID $bak_root_dir

@@ -1,25 +1,37 @@
 #!/bin/bash -e
 
 zm_path=$(readlink -f $0)
-zm_dir=${zm_path%/*}
-SUDO=$(which sudo || true)
+zm_workdir=${zm_path%/*}
+
+SUDO=$(test "$(id -u)" = "0" || which sudo || true)
 
 zm_version=0.02
 zm_release=2
 
+
 set -e 
 set -E 
 
-cd $zm_dir
+cd $zm_workdir
 
 sfs_mpath=/media/sfs
-aufs_mpath=/media/aufs
+unionfs_mpath=/media/unionfs
 sfs_part_mpath=/media/sfsroot
 sfs_root_mpath=$sfs_mpath/root
 sfs_home_mpath=$sfs_mpath/home
-aufs_root_mpath=$aufs_mpath/root
-aufs_home_mpath=$aufs_mpath/home
-aufs_clean_file_name=.aufs.clean
+unionfs_root_mpath=$unionfs_mpath/root
+unionfs_home_mpath=$unionfs_mpath/home
+unionfs_max_branch=8
+unionfs_clean_file=.unionfs.fs.clean
+
+KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
+
+zm_work_dir=/work
+zm_backup_mpath=/media/backup
+zm_backup_old_dir=${zm_backup_mpath}/old
+zm_backup_dir=/media/bak
+
+
 
 err()
 {   
@@ -46,6 +58,19 @@ backup_file()
     done
 }
 
+get_linux_kernel_code()  
+{  
+    #expr $(VERSION) \* 65536 + 0$(PATCHLEVEL) \* 256 + 0$(SUBLEVEL));  
+    VERSION=`echo $1 | awk  -F '.' 'BEGIN{OFS="."}{print $1}'`  
+    PATCHLEVEL=`echo $1 | awk  -F '.' 'BEGIN{OFS="."}{print $2}'`  
+    SUBLEVEL=`echo $1 | awk  -F '.' 'BEGIN{OFS="."}{print $3}'`  
+    #echo $VERSION  
+    #echo $PATCHLEVEL  
+    #echo $SUBLEVEL  
+    KERNEL_CODE=`expr $VERSION \* 65536 + 0$PATCHLEVEL \* 256 + 0$SUBLEVEL` 
+    echo $KERNEL_CODE  
+}
+
 download_file()
 {
     src=$1
@@ -66,10 +91,11 @@ download_file()
     fi
 }
 
+
 select_continue_debconf ()
 {
     echo "#!/bin/bash
-    source $zm_dir/common/init_debconf.sh
+    source $zm_workdir/common/init_debconf.sh
     db_reset zm_debconf/select_continue
     db_input high zm_debconf/select_continue
     db_go
@@ -147,6 +173,9 @@ usage ()
     add_help "-m, --make-system [output dir]" "make system"
     add_help "--kernel-name" "kernel name"
     add_help "--kernel-ver" "kernel ver"
+    add_help "--zm-dir" "zm system dir"
+    add_help "--zm-user" "zm system user's name"
+    add_help "--zm-userdir" "zm system user's config dir"
       
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
@@ -193,15 +222,15 @@ print_line()
 print_env()
 {
     print_line
+    debug_var deb_ver
     debug_var kernel_name
     debug_var kernel_ver
-    debug_var deb_ver
-    debug_var zm_arch
     debug_var kernel_params 
+    debug_var zm_arch
+    debug_var zm_dir
     debug_var zm_user
     debug_var zm_user_dir
     debug_var install_dir
-    debug_var sfs_dir
     debug_var apt_url
     debug_var build_dir
     for var in $@
@@ -294,8 +323,10 @@ check_mount()
 
 mount_device()
 {
-    $SUDO mount $@
     last_param=${!#}
+    if [ $# -gt 1 ];then
+        $SUDO mount $@
+    fi
 
     if [ ! -e $build_dir/.mount_devs ];then
         touch $build_dir/.mount_devs
@@ -369,8 +400,8 @@ defalut_install_dir()
         install_dir="$2"
     fi
     if [ -z "$install_dir" ];then
-        install_dir=$sfs_dir
-        if [ ! -d $sfs_dir ];then
+        install_dir=$zm_dir
+        if [ ! -d $zm_dir ];then
             mkdir -p ${sfs_part_mpath}
             mount_device LABEL=sfsroot ${sfs_part_mpath}
         fi
@@ -527,17 +558,120 @@ initrd $temp_path/$initrd_name
     genisoimage -V $iso_label -R -J -no-emul-boot -boot-load-size 4 -boot-info-table -b boot/grub/$bootfile -o $iso_filename $iso_dir
 }
 
-mount_aufs()
+mount_storage()
 {
-    sfs_file=$1
-    mount_dir=$2
+    mount_src=$1
+    mount_point=$2
+    $SUDO mkdir -p $mount_point
+    $SUDO mount $mount_src $mount_point || err "mount $@ error"
+}
 
-    check_file_exist $sfs_mnt_dir
-    check_file_exist $aufs_dir
+umount_storage()
+{
+    mount_point=$1
+    if [ -e "$mount_point" ];then
+        $SUDO umount $mount_point || err "umount $@ error"
+        if [ -d "$mount_point" ];then
+            $SUDO rmdir $mount_point
+        fi
+    fi
+}
 
-    mount_device -t tmpfs -o mode=755 tmpfs $aufs_dir
-    mount_device $sfs_file $sfs_mnt_dir
-    mount_device -t aufs -o br:$aufs_dir:$sfs_mnt_dir=ro none $mount_dir
+__mount_with_aufs()
+{
+    sfsname="$1"
+    sfsdir="$2"
+    sfsmountdir=$3
+    upperdir="$4"
+    mountdir="$5"
+
+    test -d "$upperdir" || err "upperdir: $upperdir is not found!"
+    test -d "$mountdir" || err "mountdir: $mountdir is not found!"
+
+    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+
+    if [ -e "${upperdir}/$unionfs_clean_file" ];then
+        $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+    fi
+
+    sfsmpath=$sfsmountdir/$sfsname
+    mount_storage $sfsfile $sfsmpath
+    $SUDO mount -t aufs -o br:$upperdir none $mountdir
+    $SUDO mount -t aufs -o remount,udba=none,append:${sfsmpath}=ro none $mountdir
+
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        if [ -e "${sfsfile}.${branch}" ];then
+            $SUDO mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
+            $SUDO mount -t aufs -o remount,udba=none,add:1:${sfsmpath}.${branch}=ro+wh none $mountdir
+            continue
+        fi
+        break
+    done
+}
+
+__mount_with_overlay()
+{
+    sfsname="$1"
+    sfsdir="$2"
+    sfsmountdir=$3
+    upperdir="$4"
+    mountdir="$5"
+
+
+    test -d "$upperdir" || err "upperdir: $upperdir is not found!"
+    test -d "$mountdir" || err "mountdir: $mountdir is not found!"
+
+    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+
+    if [ -e "${upperdir}/$unionfs_clean_file" ];then
+        $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+    fi
+
+    lowerdir=""
+    set_lowerdir()
+    {
+        if [ -z "$lowerdir" ];then
+            lowerdir=$@
+        else
+            lowerdir=$@:${lowerdir}
+        fi
+    }
+
+    sfsmpath=$sfsmountdir/$sfsname
+    mount_storage $sfsfile $sfsmpath
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        if [ -e "${sfsfile}.${branch}" ];then
+            mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
+            set_lowerdir ${sfsmpath}.${branch}
+            continue
+        fi
+        break
+    done
+
+    set_lowerdir ${sfsmpath}
+    debug_var $lowerdir
+
+    $SUDO mkdir -p $upperdir/upper
+    $SUDO mkdir -p $upperdir/work
+    options="lowerdir=$lowerdir,upperdir=$upperdir/upper,workdir=$upperdir/work"
+    $SUDO mount -t overlay -o $options overlay $mountdir
+}
+
+mount_unionfs()
+{
+    # sfsname sfsdir sfsmountdir upperdir mountdir
+
+    if modprobe overlay > /dev/null 2>&1;then
+        __mount_with_overlay $@
+    elif modprobe aufs > /dev/null 2>&1;then
+        __mount_with_aufs $@
+    else
+        err "no support union filesystem."
+    fi
 }
 
 zm_build_deb_checkinstall() 
@@ -567,13 +701,20 @@ zm_chroot()
 
     extension=${param1##*.}
     if [ "$extension" = "sfs" ];then
-        mount_aufs $param1 $root_dir
+        sfsname=$(basename $param1)
+        name=${sfsname//.*}
+        sfsdir=$(dirname $param1)
+        mount_device -t tmpfs -o mode=755 tmpfs $unionfs_dir
+        # sfsname sfsdir sfsmountdir upperdir mountdir
+        mount_unionfs $name $sfsdir $sfs_mnt_dir $unionfs_dir $root_dir
+        mount_device $sfs_mnt_dir/$name
+        mount_device $root_dir
         chroot_dir=$root_dir
     else
         chroot_dir=$(readlink -f "$param1")
     fi
 
-    test -e $chroot_dir/bin/sh
+    test -e $chroot_dir/bin/bash
     cp -fv /etc/resolv.conf $chroot_dir/etc/resolv.conf
     mount_device -t proc -o nosuid,noexec,nodev proc $chroot_dir/proc
     mount_device -t sysfs -o nosuid,noexec,nodev,ro sys $chroot_dir/sys
@@ -588,7 +729,7 @@ zm_chroot()
     fi
 
     echo "chroot to $chroot_dir "
-    SHELL=/bin/sh unshare --fork --pid chroot $chroot_dir $@
+    SHELL=/bin/bash unshare --fork --pid chroot $chroot_dir $@
 
     chroot_process=$(lsof -t $chroot_dir) || true
     if [ -n "$chroot_process" ];then
@@ -664,7 +805,7 @@ gen_root_sfs()
         -e "var/cache/apt/archives/.*" \
         -e "work/.*" \
         -e "home/.*/.*" 
-    touch $1/$aufs_clean_file_name
+    touch $1/$unionfs_clean_file_name
 }
 
 gen_home_sfs()
@@ -681,7 +822,7 @@ gen_home_sfs()
         -e ".*/.xsession-errors" \
         -e ".*/.kermit.log" \
         -e ".*libreoffice.*" 
-    touch $1/$aufs_clean_file_name
+    touch $1/$unionfs_clean_file_name
 }
 
 update_system()
@@ -693,7 +834,7 @@ update_system()
 
     # exec -a zm sh -c ""
     echo "#!/bin/bash
-    source $zm_dir/common/init_debconf.sh
+    source $zm_workdir/common/init_debconf.sh
     db_reset zm_debconf/sfsselect || true
     db_input high zm_debconf/sfsselect || true
     db_go || true
@@ -743,19 +884,19 @@ branch_system()
     for sel in $sels;do
         case $sel in
             root)
-                for branch in $(seq 1 $aufs_max_branch)
+                for branch in $(seq 1 $unionfs_max_branch)
                 do
-                    if [ ! -e $install_dir/root.sfs.${branch} ];then
-                        gen_root_sfs ${aufs_root_mpath}/ $install_dir/root.sfs.$branch
+                    if [ ! -e $install_dir/${root_sfs_name}.${branch} ];then
+                        gen_root_sfs ${unionfs_root_mpath}/ $install_dir/${root_sfs_name}.$branch
                         break
                     fi
                 done
                 ;;
             home)
-                for branch in $(seq 1 $aufs_max_branch)
+                for branch in $(seq 1 $unionfs_max_branch)
                 do
-                    if [ ! -e $install_dir/home.sfs.${branch} ];then
-                        gen_home_sfs ${aufs_home_mpath}/ $install_dir/home.sfs.$branch
+                    if [ ! -e $install_dir/${home_sfs_name}.${branch} ];then
+                        gen_home_sfs ${unionfs_home_mpath}/ $install_dir/${home_sfs_name}.$branch
                         break
                     fi
                 done
@@ -787,15 +928,16 @@ gen_default_grub_config()
     boot_uuid=$(blkid -s UUID $grub_device | awk -F= '{print $2}' | tr -d '"')
     temp_dir=$(mktemp -d)
     mount_device $grub_device $temp_dir
-    temp_path=/linux/$zm_arch/${zm_user}
+    temp_path=/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
     echo "
 menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
+    set zm_dir=$temp_path
     echo 'Loading $zm_arch kernel...'
-    linux $temp_path/${kernel_name} sfs_part=UUID=\$root_uuid $kernel_params 
+    linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $kernel_params 
     echo 'Loading $zm_arch initrd...'
-    initrd $temp_path/${initrd_name}
+    initrd \$zm_dir/${initrd_name}
 }" > $temp_dir/boot/grub/config/default.cfg
     sed "s/\bzm\b/$zm_user/g" common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
     umount_device $temp_dir
@@ -885,12 +1027,12 @@ create_virtual_disk()
     # qemu-nbd --cache writethrough -c /dev/nbd0 $root_file
     install-mbr --force /dev/nbd0
     install-mbr --force /dev/nbd1
-    sfdisk --label dos /dev/nbd0 << EOF
-,,0x83,*
-EOF
-    sfdisk --label dos /dev/nbd1 << EOF
-,,0x83,*
-EOF
+
+    parted -s -a optimal /dev/nbd0 mklabel msdos
+    parted -s -a optimal /dev/nbd0 mkpart primary ext2 64s 100%
+    parted -s -a optimal /dev/nbd1 mklabel msdos
+    parted -s -a optimal /dev/nbd1 mkpart primary ext2 64s 100%
+
     while [ ! -e /dev/nbd0p1 ];do
         blockdev --rereadpt /dev/nbd0
         sleep 1
@@ -912,6 +1054,7 @@ EOF
 
     echo ""
     echo "kvm -m 2048 -hda $root_file -hdb $work_file"
+    echo "kvm -m 1024 -hda $root_file"
     echo ""
 }
 
@@ -923,12 +1066,14 @@ default_zm_setup()
 
 auto_install()
 {
-    # export DEBIAN_FRONTEND=Gnome
-    # export DEBIAN_FRONTEND=Noninteractive
+    # export DEBIAN_FRONTEND=gnome
+    export DEBIAN_FRONTEND=noninteractive
 
     install_zm
     install_softs
+
     zm_user_command zm_setup
+
     gen_kernel /media/install
     gen_initrd /media/install
     gen_root_sfs / /media/install/${root_sfs_name}
@@ -941,13 +1086,6 @@ make_system()
 {
     need_root
     check_binary debootstrap
-
-    if [ -d "$1" ];then
-        install_dir=$1
-        shift
-    else
-        defalut_install_dir 
-    fi
 
     print_env
 
@@ -962,12 +1100,17 @@ make_system()
         fi
     fi
 
-    $zm_path --zm-user $zm_user --install $root_dir/tmp/ 
+    $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install $root_dir/tmp/ 
 
+    mkdir -p $zm_dir
     mkdir -p $root_dir/media/install
-    mount_device --bind $install_dir $root_dir/media/install
+    mount_device --bind $zm_dir $root_dir/media/install
 
-    zm_chroot $root_dir "/tmp/zm --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
+    if $zm_debug;then
+        zm_chroot $root_dir "/tmp/zm --debug --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
+    else
+        zm_chroot $root_dir "/tmp/zm --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
+    fi
 
     umount_device $root_dir/media/install
 }
@@ -996,8 +1139,8 @@ install_system()
     temp_dir=$dst_dir/linux/$zm_arch/$zm_user
     mkdir -p $temp_dir
 
-    $CP $sfs_dir/${kernel_name} $temp_dir
-    $CP $sfs_dir/${initrd_name} $temp_dir
+    $CP $zm_dir/${kernel_name} $temp_dir
+    $CP $zm_dir/${initrd_name} $temp_dir
     # gen_initrd $dst_dir/linux/$zm_arch/
 
     rsync -avP $root_sfs_file $temp_dir
@@ -1021,12 +1164,7 @@ install_system()
 
 add_soft()
 {	
-    zm_softs+=" "
-    zm_softs+="$@"
-    # for soft in $@ 
-    # do
-    # dpkg -s $soft > /dev/null 2>&1 || aptitude install $soft -y
-    # done
+    echo "$@" >> $soft_list_file
 }
 
 mount_apt_cache()
@@ -1041,9 +1179,10 @@ mount_apt_cache()
 
 apt_update()
 {
-    # curl www.baidu.com > /dev/null
     echo "Testing internet connect status..."
-    nc -v -w 3 www.baidu.com -z 80
+    # nc -v -w 3 www.baidu.com -z 80
+    nc -w 3 www.baidu.com -z 80
+
     mount_apt_cache
 
     if [ $zm_arch = "amd64" ];then
@@ -1051,6 +1190,7 @@ apt_update()
     fi
 
     if [ ! -e /tmp/.zm_apt_update ];then
+	echo "update system..."
         $APTGET update
         touch /tmp/.zm_apt_update
     fi
@@ -1062,6 +1202,14 @@ default_zm_setup_apt()
     > $temp_apt_src_file
     echo "deb $apt_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
     echo "deb-src $apt_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
+    if [ "$deb_ver" != "unstable" ];then
+        echo "deb $apt_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb $apt_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
+        echo "deb $apt_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $apt_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $apt_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $apt_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
+    fi
     if ! diff $temp_apt_src_file /etc/apt/sources.list > /dev/null 2>&1;then
         mv $temp_apt_src_file /etc/apt/sources.list
     fi
@@ -1078,12 +1226,20 @@ add_base_softs()
             ;;
     esac
 
-    add_soft "$kernel_softs grub2 aptitude vim nfs-common udev procinfo 
-    hdparm e2fsprogs usbutils lftp less lshw bc initramfs-tools ssh openssh-server
-    module-init-tools dosfstools exfat-utils ntfs-3g busybox genisoimage mbr 
-    iproute realpath gpm rsync util-linux gpart debootstrap pciutils 
-    gzip squashfs-tools aufs-tools locales network-manager"
-    # pigz lzip plzip xz-utils pxz p7zip-full
+    add_soft locales 
+    add_soft "$kernel_softs"
+    add_soft grub2 udev procinfo
+    add_soft initramfs-tools aptitude lsof
+    add_soft acpi-support acpi
+    add_soft hdparm usbutils lshw 
+    add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox genisoimage mbr 
+    add_soft iproute realpath gpm rsync util-linux gpart debootstrap pciutils 
+    add_soft e2fsprogs squashfs-tools aufs-tools 
+    add_soft lftp less bc
+    add_soft ssh openssh-server nfs-common 
+    add_soft vim gzip xz-utils 
+    add_soft network-manager 
+    # pigz lzip plzip pxz p7zip-full
 }
 
 
@@ -1093,17 +1249,17 @@ download_softs()
     zm_user_command zm_add_softs
     zm_user_command zm_setup_apt
     apt_update
-    # aptitude -d -R -y install $zm_softs
-    # $APTGET -d install $zm_softs || true
+
+    _download_soft()
+    {
+        echo ">>>> download $@"
+        apt-get -q --no-install-recommends --no-install-suggests --yes install -d -m $@
+    }
     if $zm_debug;then
-        for deb in "$zm_softs"
-        do
-            $APTGET install -d -m $deb || true
-        done
+        cat $soft_list_file | while read line; do _download_soft $line; done
     else
-        $APTGET install -d -m $zm_softs || true
+        _download_soft $(cat $soft_list_file)
     fi
-    # apt-get autoclean || true
 }
 
 install_softs()
@@ -1111,29 +1267,30 @@ install_softs()
     print_env
 
     download_softs
-    # aptitude upgrade -y
-    # aptitude -R -y install $zm_softs
+
     $APTGET upgrade || true
-    if $zm_debug;then
-        for deb in "$zm_softs"
-        do
-            $APTGET install $deb || true
-        done
-    else
-        $APTGET install $zm_softs || true
-    fi
+
+    _install_soft()
+    {
+        echo ">>>> install $@"
+        $APTGET install $@
+    }
+
+    cat $soft_list_file | while read line; do _install_soft $line; done
+
     apt-get -y autoremove || true
 }
 
 dump_depends()
 {
-    for deb in "$zm_softs"
+    softs=$(cat $soft_list_file)
+    for deb in $softs
     do
         apt-cache -i depends $deb
         # apt-cache --no-suggests depends $deb
     done
     $SUDO apt-get install apt-rdepends
-    apt-rdepends -d $zm_softs > /tmp/dep.dot
+    apt-rdepends -d $softs > /tmp/dep.dot
     cat /tmp/dep.dot | less
     rm /tmp/dep.dot
 }
@@ -1173,7 +1330,7 @@ install_zm()
         install_dir="/usr/share/zm"
     fi
     mkdir -p $install_dir
-    $CP $zm_dir/{zm,zm_debconf.templates,common,initramfs,mbak,user} $install_dir
+    $CP $zm_workdir/{zm,zm_debconf.templates,common,initramfs,mbak,user} $install_dir
 
     user_install_dir=$(readlink -m $install_dir/user/$zm_user)
     if [ "$zm_user_dir" != "$user_install_dir" ];then
@@ -1194,7 +1351,7 @@ zm_setup_tzdata()
     area=$1
     zone=$2
     echo "#!/bin/bash
-    . $zm_dir/common/init_debconf.sh
+    . $zm_workdir/common/init_debconf.sh
 
     rm -f /etc/localtime
     rm -f /etc/timezone
@@ -1207,7 +1364,7 @@ zm_setup_tzdata()
     chmod +x $build_dir/zm_debconf
     $CP zm_debconf.templates $build_dir/
     $build_dir/zm_debconf
-    DEBIAN_FRONTEND=Noninteractive dpkg-reconfigure -u tzdata || true
+    DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -u tzdata || true
 }
 
 zm_setup_sh()
@@ -1217,14 +1374,14 @@ zm_setup_sh()
     case "$default_shell" in
         bash) 
             echo "#!/bin/bash
-            . $zm_dir/common/init_debconf.sh
+            . $zm_workdir/common/init_debconf.sh
             db_set dash/sh 'false' || true
             db_fset dash/sh seen true || true
             " > $build_dir/zm_debconf
             ;;
         dash)
             echo "#!/bin/bash
-            . $zm_dir/common/init_debconf.sh
+            . $zm_workdir/common/init_debconf.sh
             db_set dash/sh 'true' || true
             db_fset dash/sh seen true || true
             " > $build_dir/zm_debconf
@@ -1246,7 +1403,7 @@ zm_setup_default_locales()
     rm -f /etc/locale.gen
 
     echo "#!/bin/bash
-    . $zm_dir/common/init_debconf.sh
+    . $zm_workdir/common/init_debconf.sh
 
     db_set locales/locales_to_be_generated 'en_US.UTF-8 UTF-8, zh_CN.GBK GBK, zh_CN.UTF-8 UTF-8'
     db_subst locales/default_environment_locale locales 'en_US.UTF-8, zh_CN.GBK, zh_CN.UTF-8'
@@ -1262,10 +1419,131 @@ zm_setup_default_locales()
     dpkg-reconfigure -u locales || true
 }
 
+zm_mount_backup()
+{
+    if [ -z "$@" ];then
+        return
+    fi
+
+    $SUDO mount | grep $zm_backup_mpath > /dev/null 2>&1 || return
+
+    bak_name="$1"
+    bak_root_dir=$zm_backup_dir/$bak_name
+    bak_unionfs_dir=$zm_backup_mpath/unionfs/$bak_name
+    if ! readlink -e $bak_root_dir > /dev/null 2>&1;then
+        $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
+    fi
+    if [ ! -e $bak_root_dir ];then
+        $SUDO mkdir -m 700 -p $bak_root_dir
+        $SUDO mkdir -m 700 -p $bak_unionfs_dir
+
+        # __mount_with_unionfs $bak_name $zm_backup_mpath $sfs_mpath $bak_unionfs_dir $bak_root_dir
+        mount_unionfs $bak_name $zm_backup_mpath $sfs_mpath $bak_unionfs_dir $bak_root_dir
+        if [ $? != 0 ];then
+            echo "mount unionfs error"
+            $SUDO rmdir $bak_root_dir
+            return 1
+        fi
+
+        $SUDO chown $UID $bak_unionfs_dir
+        $SUDO chown $UID $bak_root_dir
+    fi
+
+    if [ -L $zm_work_dir/$bak_name ];then
+        bak_work_dir=$(readlink -e $zm_work_dir/$bak_name)
+        if [ "$bak_work_dir" = "$bak_root_dir" ];then
+            echo $zm_work_dir/$bak_name 
+            return 0
+        else
+            rm -vf $zm_work_dir/$bak_name
+        fi
+    fi
+
+    if [ -e $zm_work_dir/$bak_name ];then
+        echo $bak_root_dir
+        return 0
+    fi
+
+    ln -s $bak_root_dir $zm_work_dir/$bak_name 
+    echo $zm_work_dir/$bak_name 
+}
+
+zm_check_backup()
+{
+    bak_params=$@
+    if [ -z "$@" ];then
+        bak_params='.'
+    fi
+
+    $SUDO mount | grep $sfs_mpath/$bak_name > /dev/null 2>&1 || return 1
+    $SUDO mount | grep $unionfs_dir_dir/$bak_name > /dev/null 2>&1 || return 1
+    # echo $bak_root_dir | grep $(readlink -e $PWD) > /dev/null && cd
+    return 0
+}
+
+zm_umount_backup()
+{
+    bak_params=$1
+    if [ -z "$1" ];then
+        bak_params='.'
+    fi
+
+    $SUDO mount | grep $zm_backup_mpath > /dev/null 2>&1 || return
+
+    if [ ! -e $zm_backup_dir ];then
+        echo "zm backup dir is not exist."
+        return 1
+    fi
+
+    for bak_name in $bak_params
+    do
+
+        if [ -z $bak_name -o "$bak_name" = '..' ];then
+            echo "param error."
+            return 0
+        fi
+
+        if [ $bak_name = '.' ];then
+            bak_name=$(basename $(readlink -e $bak_name))
+        fi
+
+        umount_storage $zm_backup_dir/$bak_name 
+
+        bak_zm_sfs_dir=$sfs_mpath/$bak_name
+        for branch in $(seq 1 $unionfs_max_branch)
+        do
+            branch_sfs_mount_dir=${bak_zm_sfs_dir}.${branch}
+            if [ -d "$branch_sfs_mount_dir" ];then
+                umount_storage $branch_sfs_mount_dir
+                continue
+            fi
+            break
+        done  
+
+        umount_storage $bak_zm_sfs_dir 
+
+        if [ -L $zm_work_dir/$bak_name ];then
+            bak_work_dir=$(readlink -e $zm_work_dir/$bak_name)
+            if [ "$bak_work_dir" !=  "$bak_root_dir" ];then
+                rm -vf $zm_work_dir/$bak_name
+            fi
+        fi
+
+    done
+}
+
+
+
+test_stable()
+{
+    echo "test"    
+}
+
 zm_argv_del()
 {
     if [ -n "$1" ];then
-        zm_argv=${zm_argv/"$1"}
+        # zm_argv=${zm_argv/"$1"}
+        zm_argv=$(echo " "$zm_argv" " | sed -e "s# $1 # #g" | xargs)
     fi
 }
 
@@ -1288,7 +1566,7 @@ zm_config()
                 ;;
             --zm-userdir) zm_argv_del $1;shift; zm_user_dir=$1; zm_argv_del $1;shift;
                 ;;
-            --sfsdir) zm_argv_del $1;shift; sfs_dir=$1; zm_argv_del $1;shift;
+            --zm-dir) zm_argv_del $1;shift; zm_dir=$1; zm_argv_del $1;shift;
                 ;;
             --arch) zm_argv_del $1;shift; zm_arch=$1; zm_argv_del $1;shift;
                 ;;
@@ -1302,7 +1580,7 @@ zm_config()
                 ;;
             --keep-build|-k) zm_argv_del $1;shift; keep_build_dir="yes";
                 ;;
-            --kernel-params) zm_argv_del $1;shift; kernel_params+=" $1"; zm_argv_del $1;shift;
+            --kernel-params) zm_argv_del $1;shift; kernel_params="$1"; zm_argv_del $1;shift;
                 ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
@@ -1334,14 +1612,18 @@ zm_config()
   mnt_dir=$build_dir/mnt
   iso_dir=$build_dir/iso
   sfs_mnt_dir=$build_dir/sfs
-  aufs_dir=$build_dir/aufs
+  unionfs_dir=$build_dir/unionfs
   root_dir=$build_dir/root
   dl_dir=$build_dir/dl
+
+  soft_list_file=$build_dir/soft_list
+  > $build_dir/soft_list
+
 
   mkdir -p $mnt_dir
   mkdir -p $iso_dir
   mkdir -p $sfs_mnt_dir
-  mkdir -p $aufs_dir
+  mkdir -p $unionfs_dir
   mkdir -p $root_dir
   mkdir -p $dl_dir
 
@@ -1356,24 +1638,26 @@ zm_config()
       fi
   fi
 
-  if [ -z "$sfs_dir" ];then
-      sfs_dir=$sfs_part_mpath/linux/$zm_arch
-      if [ -d "$sfs_dir/$zm_user" ];then
-          sfs_dir="$sfs_part_mpath/linux/$zm_arch/$zm_user"
+  if [ -z "$zm_dir" ];then
+      zm_dir=$sfs_part_mpath/linux/$zm_arch
+      if [ -d "$zm_dir/$zm_user" ];then
+          zm_dir="$sfs_part_mpath/linux/$zm_arch/$zm_user"
       fi
+      os_name="debian"
+      zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
   fi
-  root_sfs_file=$sfs_dir/${root_sfs_name}
-  home_sfs_file=$sfs_dir/${home_sfs_name}
-  kernel_file=$sfs_dir/${kernel_name}
-  initrd_file=$sfs_dir/${initrd_name}
+  root_sfs_file=$zm_dir/${root_sfs_name}
+  home_sfs_file=$zm_dir/${home_sfs_name}
+  kernel_file=$zm_dir/${kernel_name}
+  initrd_file=$zm_dir/${initrd_name}
 
   zm_user_home=$(grep $zm_user /etc/passwd | awk -F:  '{print $6}')
   if [ -z "$zm_user_dir" ];then
       if [ -d $zm_user_home/.zm ];then
           zm_user_dir=$zm_user_home/.zm
       else
-          if [ -d $zm_dir/user/$zm_user ];then
-              zm_user_dir=$zm_dir/user/$zm_user
+          if [ -d $zm_workdir/user/$zm_user ];then
+              zm_user_dir=$zm_workdir/user/$zm_user
           fi
       fi
   fi
@@ -1385,6 +1669,15 @@ zm_config()
   fi
 
   zm_user_command zm_user_init
+
+
+  if [ -z "$kernel_params" ];then
+      if $zm_debug;then
+          kernel_params="debug"
+      else
+          kernel_params="quiet"
+      fi
+  fi
 }
 
 zm_excute()
@@ -1395,7 +1688,7 @@ zm_excute()
                 ;;
             --install-system) shift; install_system $1; test -z "$1" || shift; 
                 ;;
-            --make-system) shift; make_system $@; exit 0;
+            --make-system) shift; make_system; exit 0;
                 ;;
             --gen-kernel) shift; gen_kernel $1; test -z "$1" || shift; 
                 ;;
@@ -1431,6 +1724,10 @@ zm_excute()
                 ;;
             --build-deb) shift; zm_build_deb_dhmake $1; exit 0;
                 ;;
+            --mount-backup) shift; zm_mount_backup $@; exit 0;
+                ;;
+            --umount-backup) shift; zm_umount_backup $@; exit 0;
+                ;;
             --version)
                 show_version; exit 0;
                 ;;
@@ -1445,8 +1742,13 @@ zm_excute()
 zm_init()
 {
     CP='/bin/cp -raf'
+    # aptitude -d -R -y install 
+    # APTGET='apt-get --yes'
     # APTGET='apt-get --no-install-recommends --no-install-suggests --yes'
-    APTGET='apt-get --no-install-recommends --no-install-suggests --yes -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confnew'
+	    APTGET='apt-get --no-install-recommends --no-install-suggests --yes -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confnew'
+    if ! $zm_debug;then
+	    APTGET+=' -qq'
+    fi
 
     cpu_counts=`cat /proc/cpuinfo | grep "processor" | wc -l`
 
@@ -1459,18 +1761,14 @@ zm_init()
     which pxz > /dev/null 2>&1 && XZ="pxz -T$cpu_counts"
 
 
-    root_path=""
-    home_path='home'
-    work_path='work'
-
     root_sfs_name="root.sfs"
     home_sfs_name="home.sfs"
     initrd_name="initrd.img"
     kernel_name="vmlinuz"
     kernel_ver=""
-    kernel_params="quiet"
+    kernel_params=""
 
-    sfs_dir=""
+    zm_dir=""
     zm_user=""
     zm_user_dir=""
 
@@ -1484,7 +1782,6 @@ zm_init()
     fi
 
     zm_arch=$(dpkg --print-architecture)
-    aufs_max_branch=8
 
     # no multimedia
     # apt_url=http://mirrors.163.com
@@ -1497,8 +1794,11 @@ zm_init()
     # apt_url=http://mirrors.xmu.edu.cn
     # apt_url=http://mirror.bjtu.edu.cn
 
-    zm_softs=""
     zm_auto_select="no"
+
+    code_kernel_3_18=$(get_linux_kernel_code 3.18.0)
+    code_kernel_now=$(get_linux_kernel_code $KERNEL_VERSION)
+    #echo $code_kernel_3_18 $code_kernel_now
 }
 
 zm_uninit()
@@ -1519,7 +1819,6 @@ zm_uninit()
             done
             rm -rf $build_dir/.mount_devs
         fi
-        check_mount $build_dir || true
         if $zm_debug;then
             echo "In debug mode, please manual delete $build_dir"
         else

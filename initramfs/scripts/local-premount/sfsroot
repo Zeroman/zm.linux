@@ -1,53 +1,71 @@
 #!/bin/sh 
 
-case "${1}" in
+PREREQS=""
+prereqs()
+{
+    echo $PREREQS
+}
+
+case $1 in
     prereqs)
-        echo 'script run'
         exit 0
         ;;
 esac
 
-. /scripts/functions
+if [ -e /scripts/functions ];then
+    . /scripts/functions
+fi
+
+os_name=""
+if uname -a | grep "Debian" > /dev/null 2>&1;then
+    os_name="debian"
+fi
+if uname -a | grep "Arch" > /dev/null 2>&1;then
+    os_name="archlinux"
+fi
 
 
 sfs_part=""
-aufs_part=""
+unionfs_part=""
 home_part=""
 work_part=""
 backup_part=""
 
 label_suffix=""
 
-root_sfs=""
-home_sfs=""
-sfs_in_mem=false
 sfs_show=false
-aufs_show=true
-swap_size=0
+unionfs_show=true
+
 root_mem_size=0
 home_mem_size=0
 
 zm_dir=""
 zm_kernel=""
 zm_save="no"
+zm_debug=false
 
 root_file=""
 home_file=""
-aufs_root_file=""
-aufs_home_file=""
-aufs_min_size=1024
+unionfs_min_size=1024
 
 #mount path
-new_root=/root
 sfs_part_mpath=/media/sfsroot
 sfs_mpath=/media/sfs
-aufs_mpath=/media/aufs
-sfs_ram_mpath=$sfs_mpath/ram
+unionfs_mpath=/media/unionfs
 sfs_root_mpath=$sfs_mpath/root
 sfs_home_mpath=$sfs_mpath/home
-aufs_root_mpath=""
-aufs_home_mpath=""
-aufs_clean_file_name=.aufs.clean
+unionfs_root_mpath=""
+unionfs_home_mpath=""
+unionfs_clean_file=.union.fs.clean
+
+case "$os_name" in
+    debian)
+        new_root=/root
+        ;;
+    archlinux)
+        new_root=/new_root
+        ;;
+esac
 root_mpath=/
 home_mpath=/home
 work_mpath=/work
@@ -56,20 +74,26 @@ backup_mpath=/media/backup
 home_mounted=false
 work_mounted=false
 backup_mounted=false
-aufs_part_mounted=false
-aufs_root_mounted=false
-aufs_home_mounted=false
+unionfs_part_mounted=false
+unionfs_root_mounted=false
+unionfs_home_mounted=false
 
-aufs_file_suffix="tar.gz"
-aufs_max_branch=8
+unionfs_max_branch=8
 cpu_counts=$(cat /proc/cpuinfo | grep "processor" | wc -l)
+KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
 
-GZ=gzip
-LZ=lzip
-XZ=xz
-which pigz > /dev/null && GZ="pigz -p $cpu_counts"
-which plzip > /dev/null && LZ="plzip -n $cpu_counts"
-which pxz > /dev/null && XZ="pxz -T$cpu_counts"
+get_linux_kernel_code()  
+{  
+    #expr $(VERSION) \* 65536 + 0$(PATCHLEVEL) \* 256 + 0$(SUBLEVEL));  
+    VERSION=`echo $1 | awk  -F '.' 'BEGIN{OFS="."}{print $1}'`  
+    PATCHLEVEL=`echo $1 | awk  -F '.' 'BEGIN{OFS="."}{print $2}'`  
+    SUBLEVEL=`echo $1 | awk  -F '.' 'BEGIN{OFS="."}{print $3}'`  
+    #echo $VERSION  
+    #echo $PATCHLEVEL  
+    #echo $SUBLEVEL  
+    KERNEL_CODE=`expr $VERSION \* 65536 + 0$PATCHLEVEL \* 256 + 0$SUBLEVEL`  
+    return $KERNEL_CODE  
+} 
 
 debug_var()
 {
@@ -81,16 +105,15 @@ debug_var()
 print_param_info()
 {
     debug_var sfs_part
-    debug_var aufs_part
+    debug_var unionfs_part
     debug_var home_part
     debug_var work_part
     debug_var backup_part
-    debug_var sfs_in_mem
     debug_var root_mem_size
     debug_var home_mem_size
-    debug_var aufs_min_size
-    debug_var root_sfs
-    debug_var home_sfs
+    debug_var unionfs_min_size
+    debug_var root_file
+    debug_var home_file
 }
 
 err_exit()
@@ -106,9 +129,18 @@ print_msg()
 
 goto_shell()
 {
-    print_msg "Prees ctrl + d to continue."
-    PS1='[zm:initramfs] ' /bin/sh -i </dev/console >/dev/console 2>&1
-    true
+    print_msg "$@"
+    print_msg "Goto shell, and prees ctrl + d to continue."
+
+    case "$os_name" in
+        debian)
+            PS1='[zm:initramfs] ' /bin/sh -i </dev/console >/dev/console 2>&1
+            true
+            ;;
+        archlinux)
+            launch_interactive_shell
+            ;;
+    esac
 }
 
 get_filesize_mb()
@@ -150,45 +182,6 @@ get_freesize_path()
     echo $free_path
 }
 
-decompress_file()
-{
-    src_file=$1
-    dst_dir=$2
-    file_suffix=${src_file#*.}
-
-    res_mem_size=`get_mem_freesize_mb`
-    res_mem_size=`expr $res_mem_size / 8`
-    fileSizeMB=`get_filesize_mb $src_file`
-    if [ $res_mem_size -gt $fileSizeMB ];then
-        rsync -rhP $src_file /tmp > /dev/console
-        src_file=/tmp/$(basename $src_file)
-    fi
-
-    case "$file_suffix" in
-        tar.gz)
-            $GZ -cd $src_file | tar xv -C $dst_dir
-            ;;
-        tar.lz)
-            $LZ -cd $src_file | tar xv -C $dst_dir
-            ;;
-        tar.xz)
-            $XZ -cd $src_file | tar xv -C $dst_dir
-            ;;
-        tar.7z)
-            $7Z x -o${dst_dir} $src_file 
-            ;;
-        tar)
-            tar xvf $src_file -C $dst_dir
-            ;;
-        *)
-            ;;
-    esac
-
-    if [ $res_mem_size -gt $fileSizeMB ];then
-        rm /tmp/$src_file
-    fi
-}
-
 mount_storage()
 {
     mount_src=$1
@@ -198,7 +191,7 @@ mount_storage()
         checkfs $mount_src $mount_point
     fi
     print_msg "Mounting $mount_src on $mount_point ..."
-    mkdir -p $mount_point
+    mkdir -p -m 0755 $mount_point
     mount $mount_src $mount_point || err_exit "mount $@ error"
 }
 
@@ -207,7 +200,7 @@ mount_move()
     old_mpath=$1
     new_mpath=$2/$1
 
-    mkdir -p $new_mpath
+    mkdir -p -m 0755 $new_mpath
     mount -n -o move $old_mpath $new_mpath || err_exit "mount move $old_mpath $new_mpath error"
 }
 
@@ -218,14 +211,11 @@ init_params()
             sfs_part=*)
                 sfs_part=${x#sfs_part=}
                 ;;
-            aufs_part=*)
-                aufs_part=${x#aufs_part=}
+            unionfs_part=*)
+                unionfs_part=${x#unionfs_part=}
                 ;;
             label_suffix=*)
                 label_suffix=${x#label_suffix=}
-                ;;
-            swap_size=*)
-                swap_size=${x#swap_size=}
                 ;;
             root_mem_size=*)
                 root_mem_size=${x#root_mem_size=}
@@ -235,12 +225,6 @@ init_params()
                 ;;
             zm_dir=*)
                 zm_dir=${x#zm_dir=}
-                ;;
-            root_sfs=*)
-                root_sfs=${x#root_sfs=}
-                ;;
-            home_sfs=*)
-                home_sfs=${x#home_sfs=}
                 ;;
             home_part=*)
                 home_part=${x#home_part=}
@@ -257,10 +241,8 @@ init_params()
             zm_save=*)
                 zm_save=${x#zm_save=}
                 ;;
-            sfs_in_mem)
-                sfs_in_mem=true
-                ;;
             debug)
+                zm_debug=true
                 set -x
                 ;;
         esac
@@ -276,16 +258,11 @@ init_params()
             ;;
     esac
 
-    if [ $swap_size = 0 ];then
-        in_virtual_machine="no"
-        if cat /proc/cpuinfo | grep 'model name' | grep -i -E 'kvm|qemu|virtual' > /dev/null;then
-            in_virtual_machine="yes"
-        fi
-        all_mem_size=$(free -g | grep Mem | awk '{print $2}')
-        if [ $in_virtual_machine = "no" -a "$all_mem_size" -lt 8 ];then
-            swap_size=4096
-        fi
+    in_virtual_machine="no"
+    if cat /proc/cpuinfo | grep 'model name' | grep -i -E 'kvm|qemu|virtual' > /dev/null;then
+        in_virtual_machine="yes"
     fi
+    all_mem_size=$(free -g | grep Mem | awk '{print $2}')
 
     if [ -z "$zm_kernel" ];then
         err_exit "Not find kernel param in cmdline."
@@ -295,16 +272,8 @@ init_params()
         zm_dir=$(dirname $zm_kernel)
     fi
 
-    if [ -z "$root_sfs" ];then
-        root_sfs="$zm_dir/root.sfs"
-    fi
-
-    if [ -z "$home_sfs" ];then
-        home_sfs="$zm_dir/home.sfs"
-    fi
-
     free_mem_size=$(get_mem_freesize_mb) 
-    if [ "$free_mem_size" -gt "$aufs_min_size" ];then
+    if [ "$free_mem_size" -gt "$unionfs_min_size" ];then
         test $root_mem_size = 0 && root_mem_size=$free_mem_size
         test $home_mem_size = 0 && home_mem_size=$free_mem_size
     fi
@@ -334,13 +303,13 @@ init_sfs()
     # modprobe ntfs
 
     test -n "$sfs_part" && sfs_part=$(resolve_device $sfs_part)
-    test -n "$aufs_part" && aufs_part=$(resolve_device $aufs_part)
+    test -n "$unionfs_part" && unionfs_part=$(resolve_device $unionfs_part)
     test -n "$home_part" && home_part=$(resolve_device $home_part)
     test -n "$work_part" && work_part=$(resolve_device $work_part)
     test -n "$backup_part" && backup_part=$(resolve_device $backup_part)
 
     test -n "$sfs_part" || sfs_part="/dev/disk/by-label/sfsroot$label_suffix"
-    test -n "$aufs_part" || aufs_part="/dev/disk/by-label/aufs$label_suffix"
+    test -n "$unionfs_part" || unionfs_part="/dev/disk/by-label/unionfs$label_suffix"
     test -n "$home_part" || home_part="/dev/disk/by-label/home$label_suffix"
     test -n "$work_part" || work_part="/dev/disk/by-label/work$label_suffix"
     test -n "$backup_part" || backup_part="/dev/disk/by-label/backup$label_suffix"
@@ -350,7 +319,7 @@ init_sfs()
         if [ -n "$sfs_part" ];then
             label=$(basename $sfs_part)
             label_suffix=${label/sfsroot}
-            aufs_part="/dev/disk/by-label/aufs$label_suffix"
+            unionfs_part="/dev/disk/by-label/unionfs$label_suffix"
             home_part="/dev/disk/by-label/home$label_suffix"
             work_part="/dev/disk/by-label/work$label_suffix"
             backup_part="/dev/disk/by-label/backup$label_suffix"
@@ -359,7 +328,7 @@ init_sfs()
 
     if ! wait_sfspart 1;then
         test -b "$sfs_part" || sfs_part="/dev/disk/by-label/sfsroot$label_suffix"
-        test -b "$aufs_part" || aufs_part="/dev/disk/by-label/aufs$label_suffix"
+        test -b "$unionfs_part" || unionfs_part="/dev/disk/by-label/unionfs$label_suffix"
         test -b "$home_part" || home_part="/dev/disk/by-label/home$label_suffix"
         test -b "$work_part" || work_part="/dev/disk/by-label/work$label_suffix"
         test -b "$backup_part" || backup_part="/dev/disk/by-label/backup$label_suffix"
@@ -371,42 +340,11 @@ init_sfs()
 
     mount_storage $sfs_part $sfs_part_mpath
 
+    root_sfs="$zm_dir/root.sfs"
+    home_sfs="$zm_dir/home.sfs"
     root_file=$(readlink -f $sfs_part_mpath/${root_sfs} || true)
     home_file=$(readlink -f $sfs_part_mpath/${home_sfs} || true)
-    aufs_root_file=$(readlink -f $sfs_part_mpath/rootaufs.${aufs_file_suffix} || true)
-    aufs_home_file=$(readlink -f $sfs_part_mpath/homeaufs.${aufs_file_suffix} || true)
-
     test -e "$root_file" || err_exit "Not found root sfs file!"
-
-    if $sfs_in_mem;then
-        mkdir -p $sfs_ram_mpath
-        root_fileSizeMB=$(get_filesize_mb $root_file)
-
-        ramsfsSizeMB=$root_fileSizeMB
-        if [ -e "$home_file" ];then
-            home_fileSizeMB=$(get_filesize_mb "$home_file")
-            ramsfsSizeMB=$(expr $ramsfsSizeMB + $home_fileSizeMB)
-        fi
-        ramsfsSizeMB=$(expr $ramsfsSizeMB + 2)
-
-        res_mem_size=$(get_mem_freesize_mb)
-        res_mem_size=$(expr $res_mem_size / 2)
-
-        if [ $res_mem_size -gt $ramsfsSizeMB ];then
-            #mount -t tmpfs -o mode=755,size=${ramsfsSizeMB}m tmpfs $sfs_ram_mpath
-            mount -t tmpfs -o mode=755 tmpfs $sfs_ram_mpath
-
-            rsync -rhP $root_file $sfs_ram_mpath > /dev/console
-            root_file=$sfs_ram_mpath/$(basename $root_sfs)
-
-            if [ -e "$home_file" ];then
-                rsync -rhP $home_file $sfs_ram_mpath > /dev/console
-                home_file=$sfs_ram_mpath/$(basename $home_sfs)
-            fi
-        else
-            sfs_in_mem=false
-        fi
-    fi
 
     if [ -b "$work_part" ];then
         mount_storage $work_part $work_mpath && work_mounted=true
@@ -415,63 +353,135 @@ init_sfs()
         mount_storage $backup_part $backup_mpath && backup_mounted=true
     fi
 
-    if [ -b $aufs_part ];then
-        mkdir -p $aufs_mpath
-        mount_storage $aufs_part $aufs_mpath && aufs_part_mounted=true
-        aufs_root_mpath=$aufs_mpath/aufs/root
-        aufs_home_mpath=$aufs_mpath/aufs/home
-        mkdir -p -m 0755 $aufs_root_mpath
-        mkdir -p -m 0755 $aufs_home_mpath
+    if [ -b $unionfs_part ];then
+        mkdir -p -m 0755 $unionfs_mpath
+        mount_storage $unionfs_part $unionfs_mpath && unionfs_part_mounted=true
+        unionfs_root_mpath=$unionfs_mpath/unionfs/root
+        unionfs_home_mpath=$unionfs_mpath/unionfs/home
+        mkdir -p -m 0755 $unionfs_root_mpath
+        mkdir -p -m 0755 $unionfs_home_mpath
     else
-        if [ "$zm_save" = "yes" -o $(get_mem_freesize_mb) -lt $aufs_min_size ];then
-            aufs_path=$(get_freesize_path $aufs_min_size $sfs_part_mpath)
-            test -z "$aufs_path" && err_exit "Can't get aufs space."
+        if [ "$zm_save" = "yes" -o $(get_mem_freesize_mb) -lt $unionfs_min_size ];then
+            unionfs_path=$(get_freesize_path $unionfs_min_size $sfs_part_mpath)
+            test -z "$unionfs_path" && err_exit "Can't get unionfs space."
 
-            aufs_root_mpath=$aufs_path/aufs/root
-            aufs_home_mpath=$aufs_path/aufs/home
-            mkdir -p -m 0755 $aufs_root_mpath
-            mkdir -p -m 0755 $aufs_home_mpath
+            unionfs_root_mpath=$unionfs_path/unionfs/root
+            unionfs_home_mpath=$unionfs_path/unionfs/home
+            mkdir -p -m 0755 $unionfs_root_mpath
+            mkdir -p -m 0755 $unionfs_home_mpath
             if [ $zm_save != "yes" ];then
-                touch ${aufs_root_mpath}/$aufs_clean_file_name
-                touch ${aufs_home_mpath}/$aufs_clean_file_name
+                touch ${unionfs_root_mpath}/$unionfs_clean_file
+                touch ${unionfs_home_mpath}/$unionfs_clean_file
             fi
         fi
     fi
 }
 
-mount_root()
+# mount_with_aufs root /media/sfsroot/linux/amd64/zm /media/sfs /media/union_fs/ /root/
+__mount_with_aufs()
 {
-    test -e "$root_file" || err_exit "$root_file is not found!"
+    sfsname="$1"
+    sfsdir="$2"
+    sfsmountdir=$3
+    upperdir="$4"
+    mountdir="$5"
 
-    if [ -z "$aufs_root_mpath" ];then
-        test $root_mem_size -gt $aufs_min_size || err_exit "root_mem_size less len aufs_min_size"
-        aufs_root_mpath=$aufs_mpath/root
-        mkdir -p -m 0755 $aufs_root_mpath
-        mount -t tmpfs -o mode=755,size=${root_mem_size}m none $aufs_root_mpath && aufs_root_mounted=true
+    test -d "$upperdir" || err_exit "upperdir: $upperdir is not found!"
+    test -d "$mountdir" || err_exit "mountdir: $mountdir is not found!"
+
+    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    test -f "$sfsfile" || err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+
+    if [ -e "${upperdir}/$unionfs_clean_file" ];then
+        rm -rf ${upperdir}/{*,.[!.]*,..?*}
     fi
 
-    if [ -e "${aufs_root_mpath}/$aufs_clean_file_name" ];then
-        rm -rf ${aufs_root_mpath}/.*
-    fi
-
-    if [ -e "$aufs_root_file" ];then
-        decompress_file $aufs_root_file $aufs_root_mpath
-    fi
-
-    mount_storage $root_file $sfs_root_mpath
-    mount -t aufs -o br:$aufs_root_mpath none ${new_root}/$root_mpath
-    mount -t aufs -o remount,udba=none,append:${sfs_root_mpath}=ro none ${new_root}/$root_mpath
-    for branch in $(seq 1 $aufs_max_branch)
+    sfsmpath=$sfsmountdir/$sfsname
+    mount_storage $sfsfile $sfsmpath
+    mount -t aufs -o br:$upperdir none $mountdir
+    mount -t aufs -o remount,udba=none,append:${sfsmpath}=ro none $mountdir
+    for branch in $(seq 1 $unionfs_max_branch)
     do
-        if [ -e "${root_file}.${branch}" ];then
-            mount_storage ${root_file}.${branch} ${sfs_root_mpath}.${branch}
-            mount -t aufs -o remount,udba=none,add:1:${sfs_root_mpath}.${branch}=ro+wh none ${new_root}/$root_mpath
+        if [ -e "${sfsfile}.${branch}" ];then
+            mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
+            mount -t aufs -o remount,udba=none,add:1:${sfsmpath}.${branch}=ro+wh none $mountdir
+            continue
+        fi
+        break
+    done
+}
+
+__mount_with_overlay()
+{
+    sfsname="$1"
+    sfsdir="$2"
+    sfsmountdir=$3
+    upperdir="$4"
+    mountdir="$5"
+
+
+    test -d "$upperdir" || err_exit "upperdir: $upperdir is not found!"
+    test -d "$mountdir" || err_exit "mountdir: $mountdir is not found!"
+
+    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    test -f "$sfsfile" || err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+
+    if [ -e "${upperdir}/$unionfs_clean_file" ];then
+        rm -rf ${upperdir}/{*,.[!.]*,..?*}
+    fi
+
+    lowerdir=""
+    set_lowerdir()
+    {
+        if [ -z "$lowerdir" ];then
+            lowerdir=$@
+        else
+            lowerdir=$@:${lowerdir}
+        fi
+    }
+
+    sfsmpath=$sfsmountdir/$sfsname
+    mount_storage $sfsfile $sfsmpath
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        if [ -e "${sfsfile}.${branch}" ];then
+            mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
+            set_lowerdir ${sfsmpath}.${branch}
             continue
         fi
         break
     done
 
+    set_lowerdir ${sfsmpath}
+    debug_var $lowerdir
 
+    mkdir -p -m 0755 $upperdir/upper
+    mkdir -p -m 0755 $upperdir/work
+    options="lowerdir=$lowerdir,upperdir=$upperdir/upper,workdir=$upperdir/work"
+    mount -t overlay -o $options overlay $mountdir
+}
+
+mount_unionfs()
+{
+    if modprobe overlay > /dev/null 2>&1;then
+        __mount_with_overlay $@
+    elif modprobe aufs > /dev/null 2>&1;then
+        __mount_with_aufs $@
+    else
+        echo "no support union filesystem."
+        return 1
+    fi
+}
+
+mount_root()
+{
+    if [ -z "$unionfs_root_mpath" ];then
+        test $root_mem_size -gt $unionfs_min_size || err_exit "root_mem_size less len unionfs_min_size"
+        unionfs_root_mpath=$unionfs_mpath/root
+        mkdir -p -m 0755 $unionfs_root_mpath
+        mount -t tmpfs -o mode=755,size=${root_mem_size}m none $unionfs_root_mpath && unionfs_root_mounted=true
+    fi
+    mount_unionfs root $sfs_part_mpath/$zm_dir $sfs_mpath $unionfs_root_mpath ${new_root}/$root_mpath
 }
 
 mount_home()
@@ -483,39 +493,17 @@ mount_home()
     fi
 
     if [ ! -e "$home_file" ];then
-        goto_shell "$home_file is not found, maybe start with error, please check again." 
+        goto_shell "home file is not found, maybe start with error, please check again." 
     fi
 
-    if [ -z "$aufs_home_mpath" ];then
-        test $home_mem_size -gt $aufs_min_size || err_exit "home_mem_size less then aufs_min_size"
-        aufs_home_mpath=$aufs_mpath/home
-        mkdir -p -m 0755 $aufs_home_mpath
-        mount -t tmpfs -o mode=755,size=${home_mem_size}m none $aufs_home_mpath && aufs_home_mounted=true
+    if [ -z "$unionfs_home_mpath" ];then
+        test $home_mem_size -gt $unionfs_min_size || err_exit "home_mem_size less then unionfs_min_size"
+        unionfs_home_mpath=$unionfs_mpath/home
+        mkdir -p -m 0755 $unionfs_home_mpath
+        mount -t tmpfs -o mode=755,size=${home_mem_size}m none $unionfs_home_mpath && unionfs_home_mounted=true
     fi
 
-    if [ -e "${aufs_home_mpath}/$aufs_clean_file_name" ];then
-        # shopt -s dotglob
-        rm -rf $aufs_home_mpath/.*
-        # shopt -u dotglob
-    fi
-
-    if [ -e "$aufs_home_file" ];then
-        decompress_file $aufs_home_file $aufs_home_mpath
-    fi
-
-    mount_storage $home_file $sfs_home_mpath
-    mkdir -p $home_mpath
-    mount -t aufs -o br:$aufs_home_mpath none $home_mpath
-    mount -t aufs -o remount,udba=none,append:${sfs_home_mpath}=ro none $home_mpath && home_mounted=true
-    for branch in $(seq 1 $aufs_max_branch)
-    do
-        if [ -e "${home_file}.${branch}" ];then
-            mount_storage ${home_file}.${branch} ${sfs_home_mpath}.${branch}
-            mount -t aufs -o remount,udba=none,add:1:${sfs_home_mpath}.${branch}=ro+wh none $home_mpath
-            continue
-        fi
-        break
-    done
+    mount_unionfs home $sfs_part_mpath/$zm_dir $sfs_mpath $unionfs_home_mpath ${new_root}/$home_mpath
 }
 
 swap_file() 
@@ -527,53 +515,28 @@ swap_file()
 
 mount_swap()
 {
-    if [ $swap_size = 0 ];then
-        return
-    fi
-
     if [ -b /dev/disk/by-label/swap$label_suffix ];then
         swapon LABEL=swap$label_suffix
-    else
-        if [ -e "$swap_path/swap.img" ];then
-            temp_size=$(get_filesize_mb $swap_path/swap.img)
-            temp_size=$(expr $temp_size + 512)
-            if [ "$temp_size" -gt "$swap_size" ];then 
-                swap_file $swap_path/swap.img
-                return
-            fi
-        fi
-
-        temp_size=$(expr $swap_size + 512)
-        swap_path=$(get_freesize_path "$temp_size" $sfs_part_mpath $work_mpath $backup_mpath)
-        if [ -n "$swap_path" ];then
-            dd if=/dev/zero of=$swap_path/swap.img bs=1M count=$swap_size
-            swap_file $swap_path/swap.img
-        fi
     fi
 }
 
 move_to_newroot()
 {
-    if $sfs_in_mem;then
-        mount_move $sfs_ram_mpath ${new_root}
-        umount $sfs_part_mpath
-    else
-        mount_move $sfs_part_mpath ${new_root}
-    fi
+    mount_move $sfs_part_mpath ${new_root}
 
     $home_mounted && mount_move $home_mpath ${new_root}
     $work_mounted && mount_move $work_mpath ${new_root}
     $backup_mounted && mount_move $backup_mpath ${new_root}
-    $aufs_part_mounted && mount_move $aufs_mpath ${new_root}
+    $unionfs_part_mounted && mount_move $unionfs_mpath ${new_root}
 
-    if $aufs_show;then
-        $aufs_root_mounted && mount_move $aufs_root_mpath ${new_root}
-        $aufs_home_mounted && mount_move $aufs_home_mpath ${new_root}
+    if $unionfs_show;then
+        $unionfs_root_mounted && mount_move $unionfs_root_mpath ${new_root}
+        $unionfs_home_mounted && mount_move $unionfs_home_mpath ${new_root}
     fi
 
     if $sfs_show;then
         mount_move $sfs_root_mpath ${new_root}
-        for branch in $(seq 1 $aufs_max_branch)
+        for branch in $(seq 1 $unionfs_max_branch)
         do
             if [ -e "${root_file}.${branch}" ];then
                 mount_move ${sfs_root_mpath}.${branch} ${new_root}
@@ -583,7 +546,7 @@ move_to_newroot()
         done
 
         mount_move $sfs_home_mpath ${new_root}
-        for branch in $(seq 1 $aufs_max_branch)
+        for branch in $(seq 1 $unionfs_max_branch)
         do
             if [ -e "${home_file}.${branch}" ];then
                 mount_move ${sfs_home_mpath}.${branch} ${new_root}
@@ -602,13 +565,42 @@ mount_archives()
     fi
 }
 
-umask 0077
-init_params
-init_sfs
-mount_root
-mount_home
-mount_swap
-move_to_newroot
-mount_archives
-umask 0022
+sfsroot_main()
+{
+    # umask 0077
+    init_params
+    init_sfs
+    mount_root
+    mount_home
+    mount_swap
+    move_to_newroot
+    mount_archives
+    # umask 0022
+
+    test "$os_name" = "archlinux" && mount_handler='true'
+
+    if $zm_debug;then
+        print_param_info
+        print_msg "please input y/n for continue."
+        read choice
+        if [ "$choice" != "y" ];then
+            goto_shell
+        fi
+    fi
+}
+
+# for archlinux
+run_hook()
+{
+    sfsroot_main
+}
+
+case "$os_name" in
+    debian)
+        sfsroot_main
+        ;;
+    archlinux)
+        ;;
+esac
+
 
