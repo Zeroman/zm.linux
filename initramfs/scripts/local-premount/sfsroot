@@ -442,6 +442,7 @@ __mount_with_overlay()
 
     sfsmpath=$sfsmountdir/$sfsname
     mount_storage $sfsfile $sfsmpath
+    set_lowerdir ${sfsmpath}
     for branch in $(seq 1 $unionfs_max_branch)
     do
         if [ -e "${sfsfile}.${branch}" ];then
@@ -452,7 +453,6 @@ __mount_with_overlay()
         break
     done
 
-    set_lowerdir ${sfsmpath}
     debug_var $lowerdir
 
     mkdir -p -m 0755 $upperdir/upper
@@ -557,14 +557,6 @@ move_to_newroot()
     fi
 }
 
-mount_archives()
-{
-    if [ -d ${new_root}/var/cache/apt/archives ];then
-        mkdir -p ${new_root}/$work_mpath/cache/archives/
-        mount --bind ${new_root}/$work_mpath/cache/archives ${new_root}/var/cache/apt/archives
-    fi
-}
-
 sfsroot_main()
 {
     # umask 0077
@@ -574,7 +566,6 @@ sfsroot_main()
     mount_home
     mount_swap
     move_to_newroot
-    mount_archives
     # umask 0022
 
     test "$os_name" = "archlinux" && mount_handler='true'

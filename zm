@@ -19,8 +19,6 @@ unionfs_mpath=/media/unionfs
 sfs_part_mpath=/media/sfsroot
 sfs_root_mpath=$sfs_mpath/root
 sfs_home_mpath=$sfs_mpath/home
-unionfs_root_mpath=$unionfs_mpath/root
-unionfs_home_mpath=$unionfs_mpath/home
 unionfs_max_branch=8
 unionfs_clean_file=.unionfs.fs.clean
 
@@ -28,7 +26,6 @@ KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.'
 
 zm_work_dir=/work
 zm_backup_mpath=/media/backup
-zm_backup_old_dir=${zm_backup_mpath}/old
 zm_backup_dir=/media/bak
 
 
@@ -166,7 +163,7 @@ usage ()
     add_help "--gen-initrd [output_dir]" "generate initrd.img"
     add_help "--gen-iso-system iso_file_path" "install system to iso file"
     add_help "--build-dir dir" "build temp dir"
-    add_help "-i, --install dir" "install zm to dir"
+    add_help "--install-zm dir" "install zm to dir"
     add_help "-k, --keep-build" "Keep the temporary directory used to make the image."
     add_help "--chroot chroot_options" "like chroot options."
     add_help "--install-softs" "install softs."
@@ -176,6 +173,11 @@ usage ()
     add_help "--zm-dir" "zm system dir"
     add_help "--zm-user" "zm system user's name"
     add_help "--zm-userdir" "zm system user's config dir"
+    add_help "--mount-backup name" "mount backup"
+    add_help "--remove-backup name" "remove backup"
+    add_help "--umount-backup name" "umount backup"
+    add_help "-i,--install-soft name" "install soft"
+    add_help "--install-softs" "install all softs in config.sh"
       
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
@@ -189,18 +191,7 @@ usage ()
             printf "  %-30s : %-s\n" "$option" "$msg"
         fi
     done
-    return
 
-    echo "
-    --format-disk         format in disk
-    --gen-usb-sfssystem   generate root.sfs and home.sfs to usb disk
-    --download-softs      download softs
-    --install-softs       install softs
-    --setup
-    -i, --install         install zm
-    --version             Print version.
-    --help                Print this help message.
-    "
     exit 0
 }
 
@@ -653,7 +644,7 @@ __mount_with_overlay()
     done
 
     set_lowerdir ${sfsmpath}
-    debug_var $lowerdir
+    # debug_var lowerdir
 
     $SUDO mkdir -p $upperdir/upper
     $SUDO mkdir -p $upperdir/work
@@ -723,9 +714,9 @@ zm_chroot()
     mount_device -t tmpfs -o mode=1777,nosuid,nodev shm $chroot_dir/dev/shm
     mount_device -t tmpfs -o nosuid,nodev,mode=0755 run $chroot_dir/run
     mkdir -p $chroot_dir/run/lock
-    if [ -d /work/cache/archives ];then
-        mkdir -p $chroot_dir/var/cache/apt/archives
-        mount_device --bind /work/cache/archives $chroot_dir/var/cache/apt/archives
+    if [ -d /work/cache ];then
+        mkdir -p $chroot_dir/work/cache
+        mount_device --bind /work/cache/ $chroot_dir/work/cache
     fi
 
     echo "chroot to $chroot_dir "
@@ -736,8 +727,8 @@ zm_chroot()
        kill -9 $chroot_process
     fi
 
-    if [ -d /work/cache/archives ];then
-        umount_device $chroot_dir/var/cache/apt/archives
+    if [ -d /work/cache ];then
+        umount_device $chroot_dir/work/cache
     fi
     umount_device $chroot_dir/run
     umount_device $chroot_dir/dev/shm
@@ -784,45 +775,64 @@ gen_initrd()
     mkinitramfs -d initramfs -o $install_dir/${initrd_name} $kernel_ver
 }
 
-gen_root_sfs()
+gen_common_sfs()
 {
+
+    srcdir=$1
+    dstsfs=$2
+    shift 2
+
     check_binary mksquashfs
 
-    backup_file $2
-    backup_file $2.[0-9]
-    mksquashfs $1 $2 -comp lzo -regex \
-        -e "lost+found" -e "sys/.*" -e "proc/.*" -e "run/.*" \
-        -e "var/tmp/.*" -e "tmp/.*" \
-        -e "media/.*" -e "mnt/.*" -e "dev/disk/.*/.*" \
-        -e "etc/mtab" -e "etc/fstab" \
-        -e "etc/udev/rules.d/70-.*net.*" \
-        -e "etc/hal/fdi/policy/11-x11-vmmouse.fdi" \
-        -e "etc/X11/xorg.conf*" \
-        -e "usr/portage/distfiles/.*" \
-        -e "usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi" \
-        -e "usr/bin/vmmouse_detect" \
-        -e "var/cache/hald/fdi-cache" \
-        -e "var/cache/apt/archives/.*" \
-        -e "work/.*" \
-        -e "home/.*/.*" 
-    touch $1/$unionfs_clean_file_name
+    backup_file ${dstsfs}
+    backup_file ${dstsfs}.[0-9]
+
+    temp_exclude_file=$(mktemp)
+    echo "lost+found" >> $temp_exclude_file
+    echo "$unionfs_clean_file" >> $temp_exclude_file
+    for param in $@
+    do
+        echo $param >> $temp_exclude_file
+    done
+
+    # cat $temp_exclude_file
+
+    mksquashfs ${srcdir} ${dstsfs} -comp lzo -regex -ef $temp_exclude_file
+    rm -f $temp_exclude_file
+    touch ${srcdir}/$unionfs_clean_file
+}
+
+gen_root_sfs()
+{
+    gen_common_sfs $1 $2 \
+        "sys/.*" "proc/.*" "run/.*" \
+        "var/tmp/.*" "tmp/.*" \
+        "media/.*" "mnt/.*" "dev/disk/.*/.*" \
+        "etc/mtab" "etc/fstab" \
+        "etc/udev/rules.d/70-.*net.*" \
+        "etc/X11/xorg.conf*" \
+        "usr/portage/distfiles/.*" \
+        "etc/hal/fdi/policy/11-x11-vmmouse.fdi" \
+        "usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi" \
+        "usr/bin/vmmouse_detect" \
+        "var/cache/hald/fdi-cache" \
+        "var/cache/apt/archives/.*" \
+        "work/.*" \
+        "home/.*/.*" 
+    touch $1/$unionfs_clean_file
 }
 
 gen_home_sfs()
 {
-    check_binary mksquashfs
-
-    backup_file $2
-    backup_file $2.[0-9]
-    mksquashfs $1 $2 -comp lzo -regex \
-        -e ".*/.xauth*" -e ".*/.serverauth" \
-        -e ".*/Downloads/.*" \
-        -e ".*/.cache" \
-        -e ".*/.backup/.*" \
-        -e ".*/.xsession-errors" \
-        -e ".*/.kermit.log" \
-        -e ".*libreoffice.*" 
-    touch $1/$unionfs_clean_file_name
+    gen_common_sfs $1 $2 \
+        ".*/.xauth*" \
+        ".*/.serverauth" \
+        ".*/Downloads/.*" \
+        ".*/.cache" \
+        ".*/.backup/.*" \
+        ".*/.xsession-errors" \
+        ".*/.kermit.log" \
+        ".*libreoffice.*" 
 }
 
 update_system()
@@ -877,6 +887,7 @@ branch_system()
 {
     need_root
     defalut_install_dir
+
     sels="$1"
     if [ -z "$1" ];then
         sels="root home"
@@ -1090,17 +1101,17 @@ make_system()
     print_env
 
     if [ ! -e "$root_dir/bin/sh" ];then
-        if [ -d /work/cache/archives ];then
+        if [ -d /work/cache/apt-archives ];then
             mkdir -p $root_dir/var/cache/apt/archives
-            mount_device --bind /work/cache/archives $root_dir/var/cache/apt/archives
+            mount_device --bind /work/cache/apt-archives $root_dir/var/cache/apt/archives
         fi
         debootstrap --arch $zm_arch ${deb_ver} $root_dir $apt_url/debian
-        if [ -d /work/cache/archives ];then
+        if [ -d /work/cache/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
         fi
     fi
 
-    $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install $root_dir/tmp/ 
+    $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install-zm $root_dir/tmp/ 
 
     mkdir -p $zm_dir
     mkdir -p $root_dir/media/install
@@ -1150,7 +1161,7 @@ install_system()
         rsync -avP $home_sfs_file.[0-9] $temp_dir || true
     fi
 
-    $zm_path --install $root_dir/zm
+    $zm_path --install-zm $root_dir/zm
 
     sync;sync;sync
 
@@ -1167,30 +1178,14 @@ add_soft()
     echo "$@" >> $soft_list_file
 }
 
-mount_apt_cache()
-{
-    if mount | grep /work/cache/archives > /dev/null;then
-        return
-    fi
-    if [ -d /work/cache/archives ];then
-        mount --bind /work/cache/archives /var/cache/apt/archives
-    fi
-}
-
 apt_update()
 {
-    echo "Testing internet connect status..."
-    # nc -v -w 3 www.baidu.com -z 80
-    nc -w 3 www.baidu.com -z 80
-
-    mount_apt_cache
-
-    if [ $zm_arch = "amd64" ];then
-        dpkg --add-architecture i386
-    fi
-
     if [ ! -e /tmp/.zm_apt_update ];then
-	echo "update system..."
+        echo "Testing internet connect status..."
+        # nc -v -w 3 www.baidu.com -z 80
+        nc -w 3 www.baidu.com -z 80
+
+        echo "update system..."
         $APTGET update
         touch /tmp/.zm_apt_update
     fi
@@ -1253,7 +1248,7 @@ download_softs()
     _download_soft()
     {
         echo ">>>> download $@"
-        apt-get -q --no-install-recommends --no-install-suggests --yes install -d -m $@
+        $APTGET install -d -m $@
     }
     if $zm_debug;then
         cat $soft_list_file | while read line; do _download_soft $line; done
@@ -1262,23 +1257,31 @@ download_softs()
     fi
 }
 
+install_soft()
+{
+    param=$@
+    test "$1" = "-qq" && shift
+    if dpkg-query -f '${db:Status-Status}\n' -W $@ | grep -v ^installed > /dev/null 2>&1;then
+        echo ">>>> install $@"
+        $APTGET install $param
+    fi
+}
+
 install_softs()
 {
     print_env
+
+    if [ $zm_arch = "amd64" ];then
+        $SUDO dpkg --add-architecture i386
+    fi
 
     download_softs
 
     $APTGET upgrade || true
 
-    _install_soft()
-    {
-        echo ">>>> install $@"
-        $APTGET install $@
-    }
+    cat $soft_list_file | while read line; do install_soft -qq $line; done
 
-    cat $soft_list_file | while read line; do _install_soft $line; done
-
-    apt-get -y autoremove || true
+    $SUDO $APTGET autoremove || true
 }
 
 dump_depends()
@@ -1340,8 +1343,11 @@ install_zm()
     fi
 
     if [ $install_dir = "/usr/share/zm" ];then
-        ln -sf $install_dir/zm /usr/bin/zm
+        ln -svf $install_dir/zm /usr/bin/zm
     fi
+
+    mkdir -p /usr/share/bash-completion/completions
+    ln -svf $install_dir/common/complete.bash /usr/share/bash-completion/completions/zm
 
     echo "install zm to $install_dir"
 }
@@ -1419,17 +1425,36 @@ zm_setup_default_locales()
     dpkg-reconfigure -u locales || true
 }
 
+__check_bak_env() 
+{
+    mount | grep $zm_backup_mpath > /dev/null 2>&1 || return 1
+
+    bak_name="$1"
+
+    test -z "$bak_name" && return 1
+
+    bak_path=$(readlink -e $bak_name)
+    if [ ! -d $bak_path ];then
+        echo "$bak_path is not dir"
+        return 1
+    fi
+
+    return 0
+}
+
 zm_mount_backup()
 {
     if [ -z "$@" ];then
         return
     fi
 
-    $SUDO mount | grep $zm_backup_mpath > /dev/null 2>&1 || return
 
     bak_name="$1"
     bak_root_dir=$zm_backup_dir/$bak_name
     bak_unionfs_dir=$zm_backup_mpath/unionfs/$bak_name
+
+    test -e $zm_backup_mpath/${bak_name}.sfs || return 1
+
     if ! readlink -e $bak_root_dir > /dev/null 2>&1;then
         $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
     fi
@@ -1468,6 +1493,60 @@ zm_mount_backup()
     echo $zm_work_dir/$bak_name 
 }
 
+zm_backup_()
+{
+    if ! __check_bak_env "$1";then
+        return 1
+    fi
+
+    bak_name="$1"
+    bak_path=$(readlink -e $bak_name)
+    bak_name=$(basename $bak_path)
+    bak_sfs=$zm_backup_mpath/${bak_name}.sfs
+
+    new_bak_sfs=${bak_sfs}.new
+    if [ -e "$new_bak_sfs" ];then
+        whiptail --yesno "$bak_sfs is exist, continue?" 30 80
+        if [ $? != 0 ];then
+            return 0
+        fi
+        $_SUDO chattr -i $new_bak_sfs
+        $_SUDO rm $new_bak_sfs
+    fi
+    __compress_dir_to_sfs $bak_path $new_bak_sfs
+    if [ ! -e $new_bak_sfs ];then
+        echo "compress sfs error."
+        return 1
+    fi
+
+    umbak $bak_name
+
+    $_SUDO mkdir -m 700 -p $zm_backup_old_dir
+    if [ -e "$bak_sfs" ];then
+        $_SUDO rm -f ${zm_backup_old_dir}/${bak_name}.sfs*
+        $_SUDO chattr -i $bak_sfs
+        $_SUDO mv ${bak_sfs} ${zm_backup_old_dir}
+        for branch in $(seq 1 $zm_bak_max_branch)
+        do
+            branch_file=${bak_sfs}.${branch}
+            if [ -e "$branch_file" ];then
+                $_SUDO mv ${branch_file} ${zm_backup_old_dir}/
+                continue
+            fi
+            break
+        done  
+    fi
+    $_SUDO mv $new_bak_sfs $bak_sfs
+    $_SUDO chattr +i $bak_sfs
+
+    bak_aufs_dir=$($_SUDO readlink -e $zm_backup_mpath/aufs/$bak_name)
+    if [ "$($_SUDO readlink -e $bak_aufs_dir/../..)" = "$zm_backup_mpath" ];then
+        $_SUDO rm -rf $bak_aufs_dir
+    fi
+}
+
+
+
 zm_check_backup()
 {
     bak_params=$@
@@ -1479,6 +1558,24 @@ zm_check_backup()
     $SUDO mount | grep $unionfs_dir_dir/$bak_name > /dev/null 2>&1 || return 1
     # echo $bak_root_dir | grep $(readlink -e $PWD) > /dev/null && cd
     return 0
+}
+
+zm_remove_backup()
+{
+    for bak_name in $@
+    do
+        if ! __check_bak_env "$bak_name";then
+            return 1
+        fi
+
+        bak_sfs=$zm_backup_mpath/${bak_name}.sfs
+
+        if [ ! -e $bak_sfs ];then
+            return 1
+        fi
+        $SUDO chattr -i $bak_sfs
+        backup_file ${bak_sfs}
+    done
 }
 
 zm_umount_backup()
@@ -1708,6 +1805,8 @@ zm_excute()
                 ;;
             --download-softs|-d) download_softs; shift;
                 ;;
+            --install-soft|-i) shift; apt_update; install_soft $@; exit 0; shift
+                ;;
             --install-softs) install_softs; shift
                 ;;
             --debconf-softs) zm_user_command debconf_softs; shift 
@@ -1716,7 +1815,7 @@ zm_excute()
                 ;;
             --update-system|-u) shift; update_system $1; test -z "$1" || shift; 
                 ;;
-            --install|-i) shift; install_zm $1; test -z "$1" || shift
+            --install-zm) shift; install_zm $1; test -z "$1" || shift
                 ;;
             --edit|-e) $EDITOR $zm_path; exit 0;
                 ;;
@@ -1727,6 +1826,8 @@ zm_excute()
             --mount-backup) shift; zm_mount_backup $@; exit 0;
                 ;;
             --umount-backup) shift; zm_umount_backup $@; exit 0;
+                ;;
+            --remove-backup) shift; zm_remove_backup $@; exit 0;
                 ;;
             --version)
                 show_version; exit 0;
@@ -1745,9 +1846,14 @@ zm_init()
     # aptitude -d -R -y install 
     # APTGET='apt-get --yes'
     # APTGET='apt-get --no-install-recommends --no-install-suggests --yes'
-	    APTGET='apt-get --no-install-recommends --no-install-suggests --yes -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confnew'
-    if ! $zm_debug;then
-	    APTGET+=' -qq'
+    APTGET="$SUDO apt-get --yes 
+    --no-install-recommends 
+    --no-install-suggests 
+    -o Dpkg::Options::=--force-confdef 
+    -o Dpkg::Options::=--force-confnew
+    "
+    if [ -d /work/cache/apt-archives ];then
+        APTGET+=" -o Dir::Cache::Archives=/work/cache/apt-archives"
     fi
 
     cpu_counts=`cat /proc/cpuinfo | grep "processor" | wc -l`
@@ -1776,8 +1882,8 @@ zm_init()
     keep_build_dir="no"
 
     # deb_ver=testing
-    deb_ver=$(cat /etc/apt/sources.list | awk '{print $3}' | head -1)
-    if [ "$deb_ver" != "stable" -o "$deb_ver" != "unstable" -o "$deb_ver" != "testing" ];then
+    deb_ver=$(cat /etc/apt/sources.list | grep deb | awk '{print $3}' | head -1)
+    if [ "$deb_ver" != "stable" -a "$deb_ver" != "unstable" -a "$deb_ver" != "testing" ];then
         deb_ver="stable"
     fi
 
@@ -1799,6 +1905,14 @@ zm_init()
     code_kernel_3_18=$(get_linux_kernel_code 3.18.0)
     code_kernel_now=$(get_linux_kernel_code $KERNEL_VERSION)
     #echo $code_kernel_3_18 $code_kernel_now
+
+    if modprobe overlay > /dev/null 2>&1;then
+        unionfs_root_mpath=$unionfs_mpath/root/upper
+        unionfs_home_mpath=$unionfs_mpath/home/upper
+    elif modprobe aufs > /dev/null 2>&1;then
+        unionfs_root_mpath=$unionfs_mpath/root
+        unionfs_home_mpath=$unionfs_mpath/home
+    fi
 }
 
 zm_uninit()
