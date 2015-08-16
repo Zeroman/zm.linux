@@ -24,7 +24,7 @@ unionfs_clean_file=.unionfs.fs.clean
 
 KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
 
-zm_work_dir=/work
+work_mpath=/work
 zm_backup_mpath=/media/backup
 zm_backup_dir=/media/bak
 
@@ -178,6 +178,11 @@ usage ()
     add_help "--umount-backup name" "umount backup"
     add_help "-i,--install-soft name" "install soft"
     add_help "--install-softs" "install all softs in config.sh"
+
+    add_help "--print-workdir" "print workdir"
+    add_help "--print-backup-workdir" "print backup workdir"
+    add_help "--print-backup-mountdir" "print backup mountdir"
+    add_help "--print-os-id" "print os id"
       
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
@@ -1346,8 +1351,11 @@ install_zm()
         ln -svf $install_dir/zm /usr/bin/zm
     fi
 
-    mkdir -p /usr/share/bash-completion/completions
-    ln -svf $install_dir/common/complete.bash /usr/share/bash-completion/completions/zm
+    # mkdir -p /usr/share/bash-completion/completions
+    # ln -svf $install_dir/common/complete.bash /usr/share/bash-completion/completions/zm
+
+    mkdir -p /etc/bash_completion.d/
+    ln -svf $install_dir/common/complete.bash /etc/bash_completion.d/zm
 
     echo "install zm to $install_dir"
 }
@@ -1474,23 +1482,23 @@ zm_mount_backup()
         $SUDO chown $UID $bak_root_dir
     fi
 
-    if [ -L $zm_work_dir/$bak_name ];then
-        bak_work_dir=$(readlink -e $zm_work_dir/$bak_name)
+    if [ -L $work_mpath/$bak_name ];then
+        bak_work_dir=$(readlink -e $work_mpath/$bak_name)
         if [ "$bak_work_dir" = "$bak_root_dir" ];then
-            echo $zm_work_dir/$bak_name 
+            echo $work_mpath/$bak_name 
             return 0
         else
-            rm -vf $zm_work_dir/$bak_name
+            rm -vf $work_mpath/$bak_name
         fi
     fi
 
-    if [ -e $zm_work_dir/$bak_name ];then
+    if [ -e $work_mpath/$bak_name ];then
         echo $bak_root_dir
         return 0
     fi
 
-    ln -s $bak_root_dir $zm_work_dir/$bak_name 
-    echo $zm_work_dir/$bak_name 
+    ln -s $bak_root_dir $work_mpath/$bak_name 
+    echo $work_mpath/$bak_name 
 }
 
 zm_backup_()
@@ -1619,10 +1627,10 @@ zm_umount_backup()
 
         umount_storage $bak_zm_sfs_dir 
 
-        if [ -L $zm_work_dir/$bak_name ];then
-            bak_work_dir=$(readlink -e $zm_work_dir/$bak_name)
+        if [ -L $work_mpath/$bak_name ];then
+            bak_work_dir=$(readlink -e $work_mpath/$bak_name)
             if [ "$bak_work_dir" !=  "$bak_root_dir" ];then
-                rm -vf $zm_work_dir/$bak_name
+                rm -vf $work_mpath/$bak_name
             fi
         fi
 
@@ -1946,6 +1954,7 @@ zm_uninit()
     fi
 }
 
+
 ###############################################################################
 ###############################################################################
 ###############################################################################
@@ -1954,6 +1963,27 @@ if [ $# -eq 0 -o "$1" = "--help" ];then
     usage
     exit 0
 fi
+
+case $1 in
+    --print-workdir)
+        echo $zm_workdir
+        exit 0
+        ;;
+    --print-backup-workdir)
+        echo $zm_backup_dir
+        exit 0
+        ;;
+    --print-backup-mountdir)
+        echo $zm_backup_mpath
+        exit 0
+        ;;
+    --print-os-id)
+        lsb_release -i -s
+        exit 0
+        ;;
+    *)
+        ;;
+esac
 
 zm_argv=$@
 zm_clean=true
