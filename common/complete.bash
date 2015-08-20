@@ -26,12 +26,12 @@ _zm()
 
 
     case $prev in
-        --mount-backup|--remove-backup)
+        --mount-backup|--remove-backup|--backup-info)
             local opts=$(basename -s .sfs -a $(cd $zm_backup_mountdir;/bin/ls *.sfs 2> /dev/null))
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
-        --umount-backup)
+        --umount-backup|--backup-branch)
             local opts=$(basename -a $(cd $zm_backup_workdir;/bin/ls */ -d 2> /dev/null))
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
@@ -42,13 +42,20 @@ _zm()
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
-        --install-zm|--build-dir|--zm-userdir|--zm-dir)
+        --deb-ver)
+            local opts=""
+            [[ "$zm_os_id" == "Archlinux" ]] && opts=""
+            [[ "$zm_os_id" == "Debian" ]] && opts="stable testing unstable"
+            COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
+            return 0
+            ;;
+        --install-zm|--build-dir|--zm-userdir|--zm-dir|--chroot|--backup-dir|bak)
           _filedir -d
           return 0
           ;;
         --arch)
             local opts="amd64 i386"
-            [[ "$zm_os_id" == "archlinux" ]] && opts="x86_64 i386"
+            [[ "$zm_os_id" == "Archlinux" ]] && opts="x86_64 i386"
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
@@ -56,15 +63,38 @@ _zm()
 } &&
 complete -F _zm zm 
 
+bak()
+{
+
+    local bak_dir="$1"
+    local bak_name="$2"
+    test -z "$bak_dir" && return 0
+
+    local bak_path=$(readlink -e $bak_dir)
+    test -z "$bak_path" && return 0
+    test -z "$bak_name" && bak_name=$(basename "$bak_path")
+
+    zm --backup-dir $bak_path $bak_name
+    umb $bak_name
+}
+
 mb()
 {
-    new_dir=$(zm --mount-backup $@)
+    local new_dir=$(zm --mount-backup $@)
     test -z "$new_dir" || cd $new_dir
 }
 
 umb()
 {
-    zm --umount-backup $@
+    local bak_name=$1
+
+    local bak_workdir=$zm_backup_workdir/$bak_name
+    if [ -n "$bak_name" -a -e "$bak_workdir" ];then
+        if echo "$bak_workdir" | grep $(readlink -e $PWD) > /dev/null;then
+            cd ..
+        fi
+        zm --umount-backup $bak_name
+    fi
 }
 
 _mb()

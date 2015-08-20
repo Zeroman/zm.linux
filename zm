@@ -5,14 +5,14 @@ zm_workdir=${zm_path%/*}
 
 SUDO=$(test "$(id -u)" = "0" || which sudo || true)
 
-zm_version=0.02
-zm_release=2
+zm_version=0.04
+zm_release=3
 
 
 set -e 
 set -E 
 
-cd $zm_workdir
+# cd $zm_workdir
 
 sfs_mpath=/media/sfs
 unionfs_mpath=/media/unionfs
@@ -24,9 +24,9 @@ unionfs_clean_file=.unionfs.fs.clean
 
 KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
 
-work_mpath=/work
-zm_backup_mpath=/media/backup
-zm_backup_dir=/media/bak
+work_mountdir=/work
+backup_mountdir=/media/backup
+backup_workdir=/media/bak
 
 
 
@@ -49,8 +49,8 @@ backup_file()
         shift
         if [ -e "$bak_file" ];then
             bak_file_dir=$(dirname $bak_file)/old
-            mkdir -p $bak_file_dir
-            mv -fv ${bak_file} ${bak_file_dir}
+            $SUDO mkdir -p $bak_file_dir
+            $SUDO mv -fv ${bak_file} ${bak_file_dir}
         fi
     done
 }
@@ -173,6 +173,8 @@ usage ()
     add_help "--zm-dir" "zm system dir"
     add_help "--zm-user" "zm system user's name"
     add_help "--zm-userdir" "zm system user's config dir"
+    add_help "--backup-dir dir [name]" "backup dir to sfs"
+    add_help "--backup-branch name" "backup dir branch"
     add_help "--mount-backup name" "mount backup"
     add_help "--remove-backup name" "remove backup"
     add_help "--umount-backup name" "umount backup"
@@ -183,6 +185,7 @@ usage ()
     add_help "--print-backup-workdir" "print backup workdir"
     add_help "--print-backup-mountdir" "print backup mountdir"
     add_help "--print-os-id" "print os id"
+    add_help "--version" "print version"
       
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
@@ -286,7 +289,7 @@ rm_safe()
     if [ $(get_usedsize_dir_mb "$dir") -gt 100 ];then
         select_continue "Directory($dir) have more data, please check again."
     fi
-    rm -rf "$dir"
+    $SUDO rm -rf "$dir"
 }
 
 check_removeable_device()
@@ -403,6 +406,15 @@ defalut_install_dir()
         fi
     fi
     check_file_exist $install_dir
+}
+
+zm_copy_source()
+{
+    local _dst_dir=$1
+
+    $SUDO mkdir -p $_dst_dir/
+    $SUDO $CP $zm_workdir/{zm,zm_debconf.templates,common,initramfs,mbak,user,Makefile} $_dst_dir/
+    # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
 
 install_grub()
@@ -584,6 +596,9 @@ __mount_with_aufs()
     test -d "$upperdir" || err "upperdir: $upperdir is not found!"
     test -d "$mountdir" || err "mountdir: $mountdir is not found!"
 
+    upperdir=$upperdir/aufs
+    $SUDO mkdir -p $upperdir
+
     sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
     test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
 
@@ -609,15 +624,19 @@ __mount_with_aufs()
 
 __mount_with_overlay()
 {
-    sfsname="$1"
-    sfsdir="$2"
-    sfsmountdir=$3
-    upperdir="$4"
-    mountdir="$5"
-
+    local sfsname="$1"
+    local sfsdir="$2"
+    local sfsmountdir=$3
+    local upperdir="$4"
+    local mountdir="$5"
 
     test -d "$upperdir" || err "upperdir: $upperdir is not found!"
     test -d "$mountdir" || err "mountdir: $mountdir is not found!"
+
+    local workdir=$upperdir/work
+    upperdir=$upperdir/upper
+    $SUDO mkdir -p $workdir
+    $SUDO mkdir -p $upperdir
 
     sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
     test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
@@ -651,9 +670,7 @@ __mount_with_overlay()
     set_lowerdir ${sfsmpath}
     # debug_var lowerdir
 
-    $SUDO mkdir -p $upperdir/upper
-    $SUDO mkdir -p $upperdir/work
-    options="lowerdir=$lowerdir,upperdir=$upperdir/upper,workdir=$upperdir/work"
+    options="lowerdir=$lowerdir,upperdir=$upperdir,workdir=$workdir"
     $SUDO mount -t overlay -o $options overlay $mountdir
 }
 
@@ -673,21 +690,60 @@ mount_unionfs()
 zm_build_deb_checkinstall() 
 {
     which checkinstall > /dev/null 
-    sudo checkinstall --pkgname zm --pkgversion $zm_version --pkgarch all \
+    $SUDO checkinstall --pkgname zm --pkgversion $zm_version --pkgarch all \
         --pkgrelease "${zm_release}" --pkglicense GPL --maintainer 51feel@gmail.com \
-        --requires "checkinstall,realpath,debootstrap,genisoimage,mbr,squashfs-tools" \
+        --requires "checkinstall,debootstrap,genisoimage,mbr,squashfs-tools" \
         -y --nodoc --deldesc=yes --delspec=yes --deldoc=yes --backup=no
-    sudo dpkg -r zm
-    sudo dpkg -i zm_${zm_version}-${zm_release}_all.deb
+    $SUDO dpkg -r zm
+    $SUDO dpkg -i zm_${zm_version}-${zm_release}_all.deb
 }
 
-zm_build_deb_dhmake() 
+zm_build_deb() 
 {
-    deb_dir=$build_dir/deb
-    zm_git_url=$PWD
-    mkdir $deb_dir
-    git checkout $zm_git_url $deb_dir
-    cd zm
+    local _deb_dir=$build_dir/deb
+    local _install_dir=$build_dir/zm
+    local _tar_file=$_deb_dir/zm.tar.gz
+
+    # zm_git_url=
+
+    mkdir -p $_deb_dir
+    mkdir -p $_install_dir
+
+    install_zm $_install_dir
+
+    zm_copy_source $_install_dir
+    tar czf ${_tar_file} -C $_install_dir . --exclude=.git
+
+    export EMAIL='51feel@gmail.com'
+    export DEBEMAIL='51feel@gmail.com'
+    export DEBFULLNAME='Zeroman Yang'
+
+    cd $_deb_dir
+    dh_make -y -m --copyright=gpl -p zm_${zm_version} --file ${_tar_file} || true
+    dpkg-buildpackage -d
+
+}
+
+get_sfs_new_branch_num()
+{
+    local sfsfile=$1
+    local branch=$unionfs_max_branch
+
+    if [ ! -e "${sfsfile}" ];then
+        err "${sfsfile} is not exist."
+    fi
+
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        if [ ! -e ${sfsfile}.${branch} ];then
+            break
+        fi
+    done
+
+    if [ "$branch" -ge $unionfs_max_branch ];then
+        err "$sfsile have max branch."
+    fi
+    echo $branch
 }
 
 zm_chroot()
@@ -711,7 +767,7 @@ zm_chroot()
     fi
 
     test -e $chroot_dir/bin/bash
-    cp -fv /etc/resolv.conf $chroot_dir/etc/resolv.conf
+    $CP /etc/resolv.conf $chroot_dir/etc/resolv.conf
     mount_device -t proc -o nosuid,noexec,nodev proc $chroot_dir/proc
     mount_device -t sysfs -o nosuid,noexec,nodev,ro sys $chroot_dir/sys
     mount_device -t devtmpfs -o mode=0755,nosuid udev $chroot_dir/dev
@@ -768,7 +824,7 @@ gen_kernel()
     defalut_install_dir $1
     vmlinuz=$(get_kernel_file)
     backup_file $install_dir/${kernel_name}
-    /bin/cp -fv $vmlinuz $install_dir/${kernel_name}
+    $CP $vmlinuz $install_dir/${kernel_name}
 }
 
 gen_initrd()
@@ -802,9 +858,9 @@ gen_common_sfs()
 
     # cat $temp_exclude_file
 
-    mksquashfs ${srcdir} ${dstsfs} -comp lzo -regex -ef $temp_exclude_file
+    $SUDO mksquashfs ${srcdir} ${dstsfs} -comp lzo -regex -ef $temp_exclude_file
     rm -f $temp_exclude_file
-    touch ${srcdir}/$unionfs_clean_file
+    $SUDO touch ${srcdir}/$unionfs_clean_file
 }
 
 gen_root_sfs()
@@ -893,6 +949,9 @@ branch_system()
     need_root
     defalut_install_dir
 
+    local sfsfile
+    local branch
+
     sels="$1"
     if [ -z "$1" ];then
         sels="root home"
@@ -900,22 +959,14 @@ branch_system()
     for sel in $sels;do
         case $sel in
             root)
-                for branch in $(seq 1 $unionfs_max_branch)
-                do
-                    if [ ! -e $install_dir/${root_sfs_name}.${branch} ];then
-                        gen_root_sfs ${unionfs_root_mpath}/ $install_dir/${root_sfs_name}.$branch
-                        break
-                    fi
-                done
+                sfsfile=$install_dir/${root_sfs_name}
+                branch=$(get_sfs_new_branch_num $sfsfile)
+                gen_root_sfs ${unionfs_root_mpath}/ ${sfsfile}.${branch}
                 ;;
             home)
-                for branch in $(seq 1 $unionfs_max_branch)
-                do
-                    if [ ! -e $install_dir/${home_sfs_name}.${branch} ];then
-                        gen_home_sfs ${unionfs_home_mpath}/ $install_dir/${home_sfs_name}.$branch
-                        break
-                    fi
-                done
+                sfsfile=$install_dir/${home_sfs_name}
+                branch=$(get_sfs_new_branch_num $sfsfile)
+                gen_home_sfs ${unionfs_home_mpath}/ ${sfsfile}.${branch}
                 ;;
             *)
                 ;;
@@ -1085,7 +1136,6 @@ auto_install()
     # export DEBIAN_FRONTEND=gnome
     export DEBIAN_FRONTEND=noninteractive
 
-    install_zm
     install_softs
 
     zm_user_command zm_setup
@@ -1116,16 +1166,16 @@ make_system()
         fi
     fi
 
-    $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install-zm $root_dir/tmp/ 
+    $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install-zm $root_dir/
 
     mkdir -p $zm_dir
     mkdir -p $root_dir/media/install
     mount_device --bind $zm_dir $root_dir/media/install
 
     if $zm_debug;then
-        zm_chroot $root_dir "/tmp/zm --debug --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
+        zm_chroot $root_dir "zm --debug --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
     else
-        zm_chroot $root_dir "/tmp/zm --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
+        zm_chroot $root_dir "zm --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
     fi
 
     umount_device $root_dir/media/install
@@ -1152,7 +1202,7 @@ install_system()
         mkdir -p $dst_dir
     fi
 
-    temp_dir=$dst_dir/linux/$zm_arch/$zm_user
+    temp_dir=$dst_dir/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
     mkdir -p $temp_dir
 
     $CP $zm_dir/${kernel_name} $temp_dir
@@ -1166,7 +1216,7 @@ install_system()
         rsync -avP $home_sfs_file.[0-9] $temp_dir || true
     fi
 
-    $zm_path --install-zm $root_dir/zm
+    $zm_path --install-zm $root_dir
 
     sync;sync;sync
 
@@ -1226,20 +1276,25 @@ add_base_softs()
             ;;
     esac
 
-    add_soft locales 
     add_soft "$kernel_softs"
-    add_soft grub2 udev procinfo
-    add_soft initramfs-tools aptitude lsof
+    add_soft locales 
+    add_soft bash bash-completion
+    add_soft grub2 udev procinfo 
+    add_soft aptitude lsof
     add_soft acpi-support acpi
     add_soft hdparm usbutils lshw 
-    add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox genisoimage mbr 
+    add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox mbr 
     add_soft iproute realpath gpm rsync util-linux gpart debootstrap pciutils 
-    add_soft e2fsprogs squashfs-tools aufs-tools 
+    add_soft e2fsprogs
     add_soft lftp less bc
     add_soft ssh openssh-server nfs-common 
     add_soft vim gzip xz-utils 
     add_soft network-manager 
+    add_soft dh-make
     # pigz lzip plzip pxz p7zip-full
+
+    add_soft parted lvm2 initramfs-tools lsb-release genisoimage
+    add_soft squashfs-tools aufs-tools 
 }
 
 
@@ -1266,7 +1321,7 @@ install_soft()
 {
     param=$@
     test "$1" = "-qq" && shift
-    if dpkg-query -f '${db:Status-Status}\n' -W $@ | grep -v ^installed > /dev/null 2>&1;then
+    if dpkg-query -f '${db:Status-Status}\n' -W $@ 2>&1 | grep -v ^installed > /dev/null 2>&1;then
         echo ">>>> install $@"
         $APTGET install $param
     fi
@@ -1333,31 +1388,40 @@ zm_add_groups()
 
 install_zm()
 {
-    install_dir=$1
-    if [ -z "$install_dir" ];then
-        install_dir="/usr/share/zm"
-    fi
-    mkdir -p $install_dir
-    $CP $zm_workdir/{zm,zm_debconf.templates,common,initramfs,mbak,user} $install_dir
-
-    user_install_dir=$(readlink -m $install_dir/user/$zm_user)
-    if [ "$zm_user_dir" != "$user_install_dir" ];then
-        rm_safe $user_install_dir
-        mkdir -p $user_install_dir
-        $CP -fv $zm_user_dir/. $user_install_dir/
+    local _root_dir=$1
+    if [ -z "$_root_dir" ];then
+        _root_dir=""
     fi
 
-    if [ $install_dir = "/usr/share/zm" ];then
-        ln -svf $install_dir/zm /usr/bin/zm
+    zm_copy_source $_root_dir/usr/share/zm
+
+    local _user_dir=$(readlink -m $_root_dir/usr/share/zm/user/$zm_user)
+    if [ "$zm_user_dir" != "$_user_dir" ];then
+        rm_safe $_user_dir
+        $SUDO mkdir -p $_user_dir
+        $SUDO $CP $zm_user_dir/. $_user_dir/
     fi
 
-    # mkdir -p /usr/share/bash-completion/completions
-    # ln -svf $install_dir/common/complete.bash /usr/share/bash-completion/completions/zm
+    $SUDO mkdir -p $_root_dir/usr/bin
+    $SUDO ln -svf /usr/share/zm/zm $_root_dir/usr/bin/zm
 
-    mkdir -p /etc/bash_completion.d/
-    ln -svf $install_dir/common/complete.bash /etc/bash_completion.d/zm
+    # mkdir -p $_root_dir/usr/share/bash-completion/completions
+    # ln -svf /usr/share/zm/common/complete.bash $_root_dir/usr/share/bash-completion/completions/zm
+    $SUDO mkdir -p $_root_dir/etc/bash_completion.d/
+    $SUDO ln -svf /usr/share/zm/common/complete.bash $_root_dir/etc/bash_completion.d/zm
 
-    echo "install zm to $install_dir"
+    echo "install zm to $_root_dir/"
+}
+
+uninstall_zm()
+{
+    local _root_dir=$1
+    if [ -z "$_root_dir" ];then
+        _root_dir=""
+    fi
+    rm_safe $_root_dir/usr/bin/zm
+    rm_safe $_root_dir/usr/share/zm
+    rm_safe $_root_dir/etc/bash_completion.d/zm
 }
 
 zm_setup_tzdata() 
@@ -1433,23 +1497,6 @@ zm_setup_default_locales()
     dpkg-reconfigure -u locales || true
 }
 
-__check_bak_env() 
-{
-    mount | grep $zm_backup_mpath > /dev/null 2>&1 || return 1
-
-    bak_name="$1"
-
-    test -z "$bak_name" && return 1
-
-    bak_path=$(readlink -e $bak_name)
-    if [ ! -d $bak_path ];then
-        echo "$bak_path is not dir"
-        return 1
-    fi
-
-    return 0
-}
-
 zm_mount_backup()
 {
     if [ -z "$@" ];then
@@ -1458,10 +1505,10 @@ zm_mount_backup()
 
 
     bak_name="$1"
-    bak_root_dir=$zm_backup_dir/$bak_name
-    bak_unionfs_dir=$zm_backup_mpath/unionfs/$bak_name
+    bak_root_dir=$backup_workdir/$bak_name
+    bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
 
-    test -e $zm_backup_mpath/${bak_name}.sfs || return 1
+    test -e $backup_mountdir/${bak_name}.sfs || return 1
 
     if ! readlink -e $bak_root_dir > /dev/null 2>&1;then
         $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
@@ -1470,8 +1517,8 @@ zm_mount_backup()
         $SUDO mkdir -m 700 -p $bak_root_dir
         $SUDO mkdir -m 700 -p $bak_unionfs_dir
 
-        # __mount_with_unionfs $bak_name $zm_backup_mpath $sfs_mpath $bak_unionfs_dir $bak_root_dir
-        mount_unionfs $bak_name $zm_backup_mpath $sfs_mpath $bak_unionfs_dir $bak_root_dir
+        # __mount_with_unionfs $bak_name $backup_mountdir $sfs_mpath $bak_unionfs_dir $bak_root_dir
+        mount_unionfs $bak_name $backup_mountdir $sfs_mpath $bak_unionfs_dir $bak_root_dir
         if [ $? != 0 ];then
             echo "mount unionfs error"
             $SUDO rmdir $bak_root_dir
@@ -1482,77 +1529,89 @@ zm_mount_backup()
         $SUDO chown $UID $bak_root_dir
     fi
 
-    if [ -L $work_mpath/$bak_name ];then
-        bak_work_dir=$(readlink -e $work_mpath/$bak_name)
+    if [ -L $work_mountdir/$bak_name ];then
+        bak_work_dir=$(readlink -e $work_mountdir/$bak_name)
         if [ "$bak_work_dir" = "$bak_root_dir" ];then
-            echo $work_mpath/$bak_name 
+            echo $work_mountdir/$bak_name 
             return 0
         else
-            rm -vf $work_mpath/$bak_name
+            rm -vf $work_mountdir/$bak_name
         fi
     fi
 
-    if [ -e $work_mpath/$bak_name ];then
+    if [ -e $work_mountdir/$bak_name ];then
         echo $bak_root_dir
         return 0
     fi
 
-    ln -s $bak_root_dir $work_mpath/$bak_name 
-    echo $work_mpath/$bak_name 
+    ln -s $bak_root_dir $work_mountdir/$bak_name 
+    echo $work_mountdir/$bak_name 
 }
 
-zm_backup_()
+zm_backup_branch()
 {
-    if ! __check_bak_env "$1";then
-        return 1
+    local bak_name="$1"
+    local sfsfile=$backup_mountdir/${bak_name}.sfs
+    local bak_path=$backup_mountdir/unionfs/${bak_name}
+
+    branch=$(get_sfs_new_branch_num $sfsfile)
+    gen_common_sfs ${bak_path} ${sfsfile}.${branch}
+}
+
+show_backup_info()
+{
+    for bak_name in $@;do
+        ls -ltGch $backup_mountdir/${bak_name}.sfs 
+        # find $backup_mountdir -maxdepth 1 -name ${bak_name}.sfs -printf "%P %c\n" 
+    done
+}
+
+zm_backup_info()
+{
+    if [ $# -eq 0 ];then
+        show_backup_info $(basename -s .sfs -a $(cd $backup_mountdir;/bin/ls *.sfs 2> /dev/null)) | less
+    else
+        show_backup_info $@
+    fi
+}
+
+zm_backup_dir()
+{
+    local bak_dir="$1"
+    local bak_name="$2"
+
+    test -e "$bak_dir" || return 0
+
+    local bak_path=$(readlink -e $bak_dir)
+    if [ -z "$bak_name" ];then
+        bak_name=$(basename $bak_path)
     fi
 
-    bak_name="$1"
-    bak_path=$(readlink -e $bak_name)
-    bak_name=$(basename $bak_path)
-    bak_sfs=$zm_backup_mpath/${bak_name}.sfs
+    local bak_sfs=$backup_mountdir/${bak_name}.sfs
+    local new_bak_sfs=${bak_sfs}.new
 
-    new_bak_sfs=${bak_sfs}.new
     if [ -e "$new_bak_sfs" ];then
         whiptail --yesno "$bak_sfs is exist, continue?" 30 80
         if [ $? != 0 ];then
             return 0
         fi
-        $_SUDO chattr -i $new_bak_sfs
-        $_SUDO rm $new_bak_sfs
-    fi
-    __compress_dir_to_sfs $bak_path $new_bak_sfs
-    if [ ! -e $new_bak_sfs ];then
-        echo "compress sfs error."
-        return 1
+        $SUDO chattr -i $new_bak_sfs
+        $SUDO rm $new_bak_sfs
     fi
 
-    umbak $bak_name
+    gen_common_sfs $bak_path $new_bak_sfs
 
-    $_SUDO mkdir -m 700 -p $zm_backup_old_dir
     if [ -e "$bak_sfs" ];then
-        $_SUDO rm -f ${zm_backup_old_dir}/${bak_name}.sfs*
-        $_SUDO chattr -i $bak_sfs
-        $_SUDO mv ${bak_sfs} ${zm_backup_old_dir}
-        for branch in $(seq 1 $zm_bak_max_branch)
-        do
-            branch_file=${bak_sfs}.${branch}
-            if [ -e "$branch_file" ];then
-                $_SUDO mv ${branch_file} ${zm_backup_old_dir}/
-                continue
-            fi
-            break
-        done  
+        $SUDO chattr -i $bak_sfs 
+        $SUDO chattr -i $bak_sfs.[0-9] || true
     fi
-    $_SUDO mv $new_bak_sfs $bak_sfs
-    $_SUDO chattr +i $bak_sfs
 
-    bak_aufs_dir=$($_SUDO readlink -e $zm_backup_mpath/aufs/$bak_name)
-    if [ "$($_SUDO readlink -e $bak_aufs_dir/../..)" = "$zm_backup_mpath" ];then
-        $_SUDO rm -rf $bak_aufs_dir
-    fi
+    backup_file $bak_sfs
+    backup_file ${bak_sfs}.[0-9]
+
+    $SUDO mv $new_bak_sfs $bak_sfs
+    $SUDO chattr +i $bak_sfs
 }
-
 
 
 zm_check_backup()
@@ -1572,11 +1631,7 @@ zm_remove_backup()
 {
     for bak_name in $@
     do
-        if ! __check_bak_env "$bak_name";then
-            return 1
-        fi
-
-        bak_sfs=$zm_backup_mpath/${bak_name}.sfs
+        bak_sfs=$backup_mountdir/${bak_name}.sfs
 
         if [ ! -e $bak_sfs ];then
             return 1
@@ -1593,9 +1648,9 @@ zm_umount_backup()
         bak_params='.'
     fi
 
-    $SUDO mount | grep $zm_backup_mpath > /dev/null 2>&1 || return
+    $SUDO mount | grep $backup_mountdir > /dev/null 2>&1 || return
 
-    if [ ! -e $zm_backup_dir ];then
+    if [ ! -e $backup_workdir ];then
         echo "zm backup dir is not exist."
         return 1
     fi
@@ -1612,7 +1667,7 @@ zm_umount_backup()
             bak_name=$(basename $(readlink -e $bak_name))
         fi
 
-        umount_storage $zm_backup_dir/$bak_name 
+        umount_storage $backup_workdir/$bak_name 
 
         bak_zm_sfs_dir=$sfs_mpath/$bak_name
         for branch in $(seq 1 $unionfs_max_branch)
@@ -1627,12 +1682,17 @@ zm_umount_backup()
 
         umount_storage $bak_zm_sfs_dir 
 
-        if [ -L $work_mpath/$bak_name ];then
-            bak_work_dir=$(readlink -e $work_mpath/$bak_name)
-            if [ "$bak_work_dir" !=  "$bak_root_dir" ];then
-                rm -vf $work_mpath/$bak_name
-            fi
+        bak_work_dir=$(readlink -f $work_mountdir/$bak_name)
+        if [ "$bak_work_dir" = "$backup_workdir/$bak_name" ];then
+            rm -vf $work_mountdir/$bak_name
         fi
+
+        local bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
+        for dir in upper aufs work/work work " ";do
+            if [ -d $bak_unionfs_dir/$dir ];then
+                $SUDO rmdir $bak_unionfs_dir/$dir
+            fi
+        done
 
     done
 }
@@ -1825,11 +1885,17 @@ zm_excute()
                 ;;
             --install-zm) shift; install_zm $1; test -z "$1" || shift
                 ;;
+            --uninstall-zm) shift; uninstall_zm $1; test -z "$1" || shift
+                ;;
             --edit|-e) $EDITOR $zm_path; exit 0;
                 ;;
             --chroot) shift; zm_chroot $@; exit 0;
                 ;;
-            --build-deb) shift; zm_build_deb_dhmake $1; exit 0;
+            --build-deb) shift; zm_build_deb_checkinstall $1; exit 0;
+                ;;
+            --backup-dir) shift; zm_backup_dir $@; exit 0;
+                ;;
+            --backup-branch) shift; zm_backup_branch $1; exit 0;
                 ;;
             --mount-backup) shift; zm_mount_backup $@; exit 0;
                 ;;
@@ -1837,12 +1903,21 @@ zm_excute()
                 ;;
             --remove-backup) shift; zm_remove_backup $@; exit 0;
                 ;;
+            --backup-info) shift; zm_backup_info $@; exit 0;
+                ;;
             --version)
                 show_version; exit 0;
                 ;;
             *) 
-                echo "$1"
-                type -t "$1" > /dev/null && { echo "run $1";$1; }; shift
+                if type -t "$1" > /dev/null;then
+                    func=$1
+                    shift
+                    echo "run $func"
+                    $func $@
+                else
+                    echo "unsupport param $1"
+                    shift
+                fi
                 ;;
         esac
     done
@@ -1850,7 +1925,11 @@ zm_excute()
 
 zm_init()
 {
-    CP='/bin/cp -raf'
+    if $zm_debug;then
+        CP='/bin/cp -rafv'
+    else
+        CP='/bin/cp -raf'
+    fi
     # aptitude -d -R -y install 
     # APTGET='apt-get --yes'
     # APTGET='apt-get --no-install-recommends --no-install-suggests --yes'
@@ -1970,11 +2049,11 @@ case $1 in
         exit 0
         ;;
     --print-backup-workdir)
-        echo $zm_backup_dir
+        echo $backup_workdir
         exit 0
         ;;
     --print-backup-mountdir)
-        echo $zm_backup_mpath
+        echo $backup_mountdir
         exit 0
         ;;
     --print-os-id)
