@@ -401,8 +401,10 @@ _setup_flash()
 {
     #dpkg-reconfigure flashplugin-nonfree
 
-    apt-get install flashplugin-nonfree
-    update-flashplugin-nonfree --install
+    if [ ! -e /usr/lib/flashplugin-nonfree/libflashplayer.so ];then
+        apt-get install flashplugin-nonfree
+        update-flashplugin-nonfree --install
+    fi
 
     # apt-get install pepperflashplugin-nonfree #for chromium
     # update-pepperflashplugin-nonfree --install
