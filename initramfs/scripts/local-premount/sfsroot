@@ -277,6 +277,10 @@ init_params()
         test $root_mem_size = 0 && root_mem_size=$free_mem_size
         test $home_mem_size = 0 && home_mem_size=$free_mem_size
     fi
+
+    if which lvm > /dev/null;then
+        lvm vgchange -aly --ignorelockingfailure
+    fi
 }
 
 wait_sfspart()
