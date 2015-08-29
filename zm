@@ -29,6 +29,7 @@ backup_mountdir=/media/backup
 backup_workdir=/media/bak
 
 
+log_file=/tmp/.zm.log
 
 err()
 {   
@@ -40,6 +41,11 @@ show_version ()
 {   
     echo "$zm_version"
     exit 0
+}
+
+log_info()
+{
+    echo $@ >> $log_file
 }
 
 backup_file()
@@ -88,38 +94,53 @@ download_file()
     fi
 }
 
-
-select_continue_debconf ()
+select_yesno()
 {
-    echo "#!/bin/bash
-    source $zm_workdir/common/init_debconf.sh
-    db_reset zm_debconf/select_continue
-    db_input high zm_debconf/select_continue
-    db_go
-    db_get zm_debconf/select_continue
-    echo \$RET > $build_dir/dbconf_ret
-    db_stop
-    " > $build_dir/zm_debconf
-    chmod +x $build_dir/zm_debconf
-    $CP zm_debconf.templates $build_dir/
-    $build_dir/zm_debconf 2> /dev/null || true
+    info="$1"
+    title="$2"
 
-    read ret_select < $build_dir/dbconf_ret
-    if [ "$ret_select" = "false" ];then
-        exit 1
+    if [ "$zm_auto_select" = "yes" ];then
+        return 0
+    fi
+
+    if [ -z "$title" ];then
+        cmd="dialog --stdout --yesno \"$info\" 0 0"
+    else
+        cmd="dialog --stdout --title \"$title\" --yesno \"$info\" 0 0"
+    fi
+
+    if eval $cmd;then
+        return 0
+    else
+        return 1
     fi
 }
 
-select_continue()
+dialog_continue()
 {
-    if [ "$zm_auto_select" = "yes" ];then
-        return
+    if ! select_yesno "$@";then
+        if $zm_debug;then
+            echo "$@"
+        fi
+        err "Select no and exit now."
+    fi
+}
+
+dialog_checklist()
+{
+    local win_title=$1
+    local list_title=$2
+
+    if [ -z "$win_title" -o -z "$list_title"];then
+        return 1
     fi
 
-    echo "$@ Continue? y/n"
-    read input_char
-    if [ "$input_char" !=  "y" ];then
-        err "Select no and exit now."
+    shift 2
+    cmd="dialog --title \"$win_title\" --stdout --checklist \"$listtitle\" 0 0 0 $@"
+    if ret=$(eval $cmd);then
+        echo $ret
+    else
+        echo ""
     fi
 }
 
@@ -205,9 +226,9 @@ usage ()
 
 debug_var()
 {
-    var=$1
+    local var=$1
     eval value='$'$var
-    printf "  %-15s : %-s\n" $var $value
+    printf "  %-15s : %-s\n" $var $value | tee -a $log_file
 }
 
 print_line()
@@ -287,7 +308,7 @@ rm_safe()
     fi
 
     if [ $(get_usedsize_dir_mb "$dir") -gt 100 ];then
-        select_continue "Directory($dir) have more data, please check again."
+        dialog_continue "Directory($dir) have more data, please check again."
     fi
     $SUDO rm -rf "$dir"
 }
@@ -388,7 +409,7 @@ boot_log()
 update_grub_config()
 {
     sfsroot_dev=$(mount | grep -w /media/sfsroot | awk '{print $1}')
-    select_continue "update grub on $sfsroot_dev"
+    dialog_continue "update grub on $sfsroot_dev"
     gen_default_grub_config $sfsroot_dev
 }
 
@@ -413,7 +434,7 @@ zm_copy_source()
     local _dst_dir=$1
 
     $SUDO mkdir -p $_dst_dir/
-    $SUDO $CP $zm_workdir/{zm,zm_debconf.templates,common,initramfs,mbak,user,Makefile} $_dst_dir/
+    $SUDO $CP $zm_workdir/{zm,common,initramfs,mbak,user,Makefile} $_dst_dir/
     # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
 
@@ -425,7 +446,7 @@ install_grub()
     grub_device=$(readlink -f $grub_device)
     check_file_exist $grub_device
 
-    select_continue "Install grub on $grub_device"
+    dialog_continue "Install grub on $grub_device"
 
     #恢复主扇区
     #  /sbin/install-mbr $(echo ${grub_device} | tr -d [0-9])
@@ -436,7 +457,7 @@ install_grub()
     install_grub_on_dir $mnt_dir
     if [ -e $mnt_dir/boot/grub/config/default.cfg ];then
         echo "Overwrite $mnt_dir/boot/grub/config/default.cfg ?"
-        select_continue now
+        dialog_continue now
     fi
     grub-mkdevicemap -m $mnt_dir/boot/grub/device.map
     # mount_device --bind /dev $mnt_dir/dev
@@ -491,7 +512,7 @@ format_usb_device()
     echo -n " $usb_device size is "
     print_disk_sizeinfo $usb_device
     echo "Format $usb_device now?"
-    select_continue now
+    dialog_continue now
 
     dd if=/dev/zero of=$usb_device bs=512 count=63
     sync;sleep 1;
@@ -585,13 +606,24 @@ umount_storage()
     fi
 }
 
+__set_lowerdir()
+{
+    local new=$1
+    local orig=$2
+    if [ -n "$orig" ];then
+        echo ${new}:${orig}
+    else
+        echo $new
+    fi
+}
+
 __mount_with_aufs()
 {
-    sfsname="$1"
-    sfsdir="$2"
-    sfsmountdir=$3
-    upperdir="$4"
-    mountdir="$5"
+    local sfsname="$1"
+    local sfsdir="$2"
+    local sfsmountdir=$3
+    local upperdir="$4"
+    local mountdir="$5"
 
     test -d "$upperdir" || err "upperdir: $upperdir is not found!"
     test -d "$mountdir" || err "mountdir: $mountdir is not found!"
@@ -599,27 +631,35 @@ __mount_with_aufs()
     upperdir=$upperdir/aufs
     $SUDO mkdir -p $upperdir
 
-    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
     test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
         $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
     fi
 
-    sfsmpath=$sfsmountdir/$sfsname
+    local lowerdir=""
+    local sfsmpath=$sfsmountdir/$sfsname
+
     mount_storage $sfsfile $sfsmpath
-    $SUDO mount -t aufs -o br:$upperdir none $mountdir
-    $SUDO mount -t aufs -o remount,udba=none,append:${sfsmpath}=ro none $mountdir
+    lowerdir=$(__set_lowerdir ${sfsmpath} $lowerdir)
 
     for branch in $(seq 1 $unionfs_max_branch)
     do
         if [ -e "${sfsfile}.${branch}" ];then
-            $SUDO mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
-            $SUDO mount -t aufs -o remount,udba=none,add:1:${sfsmpath}.${branch}=ro+wh none $mountdir
+            mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
+            lowerdir=$(__set_lowerdir ${sfsmpath}.${branch} $lowerdir)
+            # $SUDO mount -t aufs -o remount,udba=none,add:1:${sfsmpath}.${branch}=ro+wh none $mountdir
             continue
         fi
         break
     done
+
+    # $SUDO mount -t aufs -o br:$upperdir none $mountdir
+    # $SUDO mount -t aufs -o remount,udba=none,append:${sfsmpath}=ro none $mountdir
+
+    log_info "$FUNCNAME : lowerdir = $lowerdir"
+    $SUDO mount -t aufs -o udba=none,br:$upperdir:$lowerdir none $mountdir
 }
 
 __mount_with_overlay()
@@ -638,38 +678,30 @@ __mount_with_overlay()
     $SUDO mkdir -p $workdir
     $SUDO mkdir -p $upperdir
 
-    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
     test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
         $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
     fi
 
-    lowerdir=""
-    set_lowerdir()
-    {
-        if [ -z "$lowerdir" ];then
-            lowerdir=$@
-        else
-            lowerdir=$@:${lowerdir}
-        fi
-    }
+    local lowerdir=""
+    local sfsmpath=$sfsmountdir/$sfsname
 
-    sfsmpath=$sfsmountdir/$sfsname
     mount_storage $sfsfile $sfsmpath
+    lowerdir=$(__set_lowerdir ${sfsmpath} $lowerdir)
+
     for branch in $(seq 1 $unionfs_max_branch)
     do
         if [ -e "${sfsfile}.${branch}" ];then
             mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
-            set_lowerdir ${sfsmpath}.${branch}
+            lowerdir=$(__set_lowerdir ${sfsmpath}.${branch} $lowerdir)
             continue
         fi
         break
     done
 
-    set_lowerdir ${sfsmpath}
     # debug_var lowerdir
-
     options="lowerdir=$lowerdir,upperdir=$upperdir,workdir=$workdir"
     $SUDO mount -t overlay -o $options overlay $mountdir
 }
@@ -692,7 +724,7 @@ zm_build_deb_checkinstall()
     which checkinstall > /dev/null 
     $SUDO checkinstall --pkgname zm --pkgversion $zm_version --pkgarch all \
         --pkgrelease "${zm_release}" --pkglicense GPL --maintainer 51feel@gmail.com \
-        --requires "checkinstall,debootstrap,genisoimage,mbr,squashfs-tools" \
+        --requires "checkinstall,debootstrap,genisoimage,mbr,squashfs-tools,dialog,syslinux" \
         -y --nodoc --deldesc=yes --delspec=yes --deldoc=yes --backup=no
     $SUDO dpkg -r zm
     $SUDO dpkg -i zm_${zm_version}-${zm_release}_all.deb
@@ -824,7 +856,7 @@ gen_kernel()
     defalut_install_dir $1
     vmlinuz=$(get_kernel_file)
     backup_file $install_dir/${kernel_name}
-    $CP $vmlinuz $install_dir/${kernel_name}
+    $SUDO $CP $vmlinuz $install_dir/${kernel_name}
 }
 
 gen_initrd()
@@ -833,7 +865,7 @@ gen_initrd()
     kernel_ver=$(get_kernel_ver)
     backup_file $install_dir/${initrd_name}
     echo "Genarate $install_dir/${initrd_name}..."
-    mkinitramfs -d initramfs -o $install_dir/${initrd_name} $kernel_ver
+    $SUDO mkinitramfs -d $zm_workdir/initramfs -o $install_dir/${initrd_name} $kernel_ver
 }
 
 gen_common_sfs()
@@ -851,79 +883,66 @@ gen_common_sfs()
     temp_exclude_file=$(mktemp)
     echo "lost+found" >> $temp_exclude_file
     echo "$unionfs_clean_file" >> $temp_exclude_file
-    for param in $@
-    do
-        echo $param >> $temp_exclude_file
-    done
+    echo "$@" | xargs -n1 >> $temp_exclude_file
 
-    # cat $temp_exclude_file
+    cat $temp_exclude_file
 
     $SUDO mksquashfs ${srcdir} ${dstsfs} -comp lzo -regex -ef $temp_exclude_file
-    rm -f $temp_exclude_file
     $SUDO touch ${srcdir}/$unionfs_clean_file
+
+    rm -f $temp_exclude_file
 }
 
 gen_root_sfs()
 {
     gen_common_sfs $1 $2 \
-        "sys/.*" "proc/.*" "run/.*" \
-        "var/tmp/.*" "tmp/.*" \
-        "media/.*" "mnt/.*" "dev/disk/.*/.*" \
-        "etc/mtab" "etc/fstab" \
-        "etc/udev/rules.d/70-.*net.*" \
-        "etc/X11/xorg.conf*" \
-        "usr/portage/distfiles/.*" \
-        "etc/hal/fdi/policy/11-x11-vmmouse.fdi" \
-        "usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi" \
-        "usr/bin/vmmouse_detect" \
-        "var/cache/hald/fdi-cache" \
-        "var/cache/apt/archives/.*" \
-        "work/.*" \
-        "home/.*/.*" 
-    touch $1/$unionfs_clean_file
+        'sys/.* proc/.* run/.* \
+        var/tmp/.* tmp/.* \
+        media/.* mnt/.* dev/disk/.*/.* \
+        etc/mtab etc/fstab \
+        etc/udev/rules.d/70-.*net.* \
+        etc/X11/xorg.conf* \
+        usr/portage/distfiles/.* \
+        etc/hal/fdi/policy/11-x11-vmmouse.fdi \
+        usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi \
+        usr/bin/vmmouse_detect \
+        var/cache/hald/fdi-cache \
+        var/cache/apt/archives/.* \
+        work/.* \
+        home/.*/.*'
 }
 
 gen_home_sfs()
 {
     gen_common_sfs $1 $2 \
-        ".*/.xauth*" \
-        ".*/.serverauth" \
-        ".*/Downloads/.*" \
-        ".*/.cache" \
-        ".*/.backup/.*" \
-        ".*/.xsession-errors" \
-        ".*/.kermit.log" \
-        ".*libreoffice.*" 
+        '.*/.xauth*
+        .*/.serverauth
+        .*/Downloads/.*
+        .*/.cache
+        .*/.backup/.*
+        .*/.xsession-errors
+        .*/.kermit.log
+        .*libreoffice.*' 
 }
 
 update_system()
 {
-    need_root
-    defalut_install_dir $1
+    local sels="$@"
 
-    print_env
+    if [ -z "$sels" ];then
+        local options=""
+        options+='"kernel" "update kernel" "off" '
+        options+='"initrd" "update initrd" "off" '
+        options+='"root" "update root filesystem" "off" '
+        options+='"home" "update home filesystem" "on" '
+        sels=$(dialog_checklist "Update system" "Select update item:" $options)
+        if [ -z "$sels" ];then
+            return
+        fi
+    fi
 
-    # exec -a zm sh -c ""
-    echo "#!/bin/bash
-    source $zm_workdir/common/init_debconf.sh
-    db_reset zm_debconf/sfsselect || true
-    db_input high zm_debconf/sfsselect || true
-    db_go || true
-    db_get zm_debconf/sfsselect || true
-    echo \$RET > $build_dir/dbconf_ret
-    db_stop
-    " > $build_dir/zm_debconf
-    chmod +x $build_dir/zm_debconf
-    $CP zm_debconf.templates $build_dir/
-    $build_dir/zm_debconf || true
+    dialog_continue "[$sels] will update, continue?" "Update system"
 
-
-    read sels < $build_dir/dbconf_ret
-    # echo $sels
-
-    select_continue_debconf
-
-    IFS=', '
     for sel in $sels;do
         case $sel in
             kernel)
@@ -946,16 +965,23 @@ update_system()
 
 branch_system()
 {
-    need_root
-    defalut_install_dir
+    local sels="$@"
+
+    if [ -z "$sels" ];then
+        local options=""
+        options+='"root" "make branch on root filesystem" "on" '
+        options+='"home" "make branch on home filesystem" "on" '
+        sels=$(dialog_checklist "Update system" "Select update item:" $options)
+        if [ -z "$sels" ];then
+            return
+        fi
+    fi
+
+    dialog_continue "[$sels] will be make branch, continue?" "Make branch"
 
     local sfsfile
     local branch
 
-    sels="$1"
-    if [ -z "$1" ];then
-        sels="root home"
-    fi
     for sel in $sels;do
         case $sel in
             root)
@@ -972,6 +998,29 @@ branch_system()
                 ;;
         esac
     done
+}
+
+__merge_with_aufs()
+{
+    for item in $@;do
+        if [ -d "$item" ];then
+            echo ""
+        fi
+        if [ -f "$item" ];then
+            echo ""
+        fi
+    done
+}
+
+merge_branch()
+{
+    if modprobe overlay > /dev/null 2>&1;then
+        __merge_with_overlay $@
+    elif modprobe aufs > /dev/null 2>&1;then
+        __merge_with_aufs $@
+    else
+        err "no support union filesystem."
+    fi
 }
 
 sfs2dir()
@@ -1006,7 +1055,7 @@ menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
     echo 'Loading $zm_arch initrd...'
     initrd \$zm_dir/${initrd_name}
 }" > $temp_dir/boot/grub/config/default.cfg
-    sed "s/\bzm\b/$zm_user/g" common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
+    sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
     umount_device $temp_dir
     rmdir $temp_dir
 }
@@ -1055,6 +1104,8 @@ gen_usb_system()
 create_virtual_disk()
 {
     check_binary install-mbr 
+    check_binary syslinux
+
 
     disk_format=qcow2
     # disk_format=vdi
@@ -1066,17 +1117,17 @@ create_virtual_disk()
     work_size=64G
 
     if [ -e "$root_file" ];then
-        select_continue "$root_file exists, delete it?"
+        dialog_continue "$root_file exists, delete it?"
         rm -f $root_file
     fi
     if [ -e "$work_file" ];then
-        select_continue "$work_file exists, delete it?"
+        dialog_continue "$work_file exists, delete it?"
         rm -f $work_file
     fi
 
     print_env root_file work_file root_size work_size disk_format
 
-    select_continue "Create $disk_format virtual disk [$root_file] [$work_file]."
+    dialog_continue "Create $disk_format virtual disk [$root_file] [$work_file]."
     zm_auto_select="yes"
 
     if [ ! -e "$root_file" ];then
@@ -1092,8 +1143,9 @@ create_virtual_disk()
     qemu-nbd --cache writeback -c /dev/nbd0 $root_file
     qemu-nbd --cache writeback -c /dev/nbd1 $work_file
     # qemu-nbd --cache writethrough -c /dev/nbd0 $root_file
+
     install-mbr --force /dev/nbd0
-    install-mbr --force /dev/nbd1
+    # sudo dd if=/usr/lib/syslinux/mbr.bin of=/dev/nbd0
 
     parted -s -a optimal /dev/nbd0 mklabel msdos
     parted -s -a optimal /dev/nbd0 mkpart primary ext2 64s 100%
@@ -1424,6 +1476,13 @@ uninstall_zm()
     rm_safe $_root_dir/etc/bash_completion.d/zm
 }
 
+run_zm_debconf()
+{
+    run_file=$1
+    chmod +x $build_dir/$run_file
+    $build_dir/$run_file
+}
+
 zm_setup_tzdata() 
 {
     area=$1
@@ -1439,9 +1498,7 @@ zm_setup_tzdata()
     db_fset tzdata/Zones/$area seen true || true
 
     " > $build_dir/zm_debconf
-    chmod +x $build_dir/zm_debconf
-    $CP zm_debconf.templates $build_dir/
-    $build_dir/zm_debconf
+    run_zm_debconf $build_dir/zm_debconf
     DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -u tzdata || true
 }
 
@@ -1469,10 +1526,7 @@ zm_setup_sh()
             ;;
     esac
 
-    chmod +x $build_dir/zm_debconf
-    $CP zm_debconf.templates $build_dir/
-    $build_dir/zm_debconf
-
+    run_zm_debconf $build_dir/zm_debconf
     dpkg-reconfigure -u dash || true
 }
 
@@ -1490,10 +1544,7 @@ zm_setup_default_locales()
     db_fset locales/locales_to_be_generated seen true
 
     " > $build_dir/zm_debconf
-    chmod +x $build_dir/zm_debconf
-    $CP zm_debconf.templates $build_dir/
-    $build_dir/zm_debconf
-
+    run_zm_debconf $build_dir/zm_debconf
     dpkg-reconfigure -u locales || true
 }
 
@@ -1513,7 +1564,7 @@ zm_mount_backup()
     if ! readlink -e $bak_root_dir > /dev/null 2>&1;then
         $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
     fi
-    if [ ! -e $bak_root_dir ];then
+    if ! mount | grep $bak_root_dir > /dev/null 2>&1;then
         $SUDO mkdir -m 700 -p $bak_root_dir
         $SUDO mkdir -m 700 -p $bak_unionfs_dir
 
@@ -1771,7 +1822,7 @@ zm_config()
 
   test -d "$build_dir" || err "build_dir ($build_dir) isn't dir."
   if [ $(get_usedsize_dir_mb "$build_dir") -gt 5000 ];then
-      select_continue "build dir($build_dir) have more data, please check again."
+      dialog_continue "build dir($build_dir) have more data, please check again."
   fi
 
   mnt_dir=$build_dir/mnt
@@ -1881,7 +1932,7 @@ zm_excute()
                 ;;
             --setup) zm_user_command zm_setup; shift
                 ;;
-            --update-system|-u) shift; update_system $1; test -z "$1" || shift; 
+            --update-system|-u) shift; update_system $@; test -z "$1" || shift; 
                 ;;
             --install-zm) shift; install_zm $1; test -z "$1" || shift
                 ;;
@@ -2025,7 +2076,7 @@ zm_uninit()
         else
             if [ "$keep_build_dir" != "yes" ];then
                 if [ $(get_usedsize_dir_mb "$build_dir") -gt 5000 ];then
-                    select_continue "build dir($build_dir) have more data, please check again."
+                    dialog_continue "build dir($build_dir) have more data, please check again."
                 fi
                 rm -rf $build_dir 
             fi
