@@ -885,7 +885,9 @@ gen_common_sfs()
     echo "$unionfs_clean_file" >> $temp_exclude_file
     echo "$@" | xargs -n1 >> $temp_exclude_file
 
-    cat $temp_exclude_file
+    if $zm_debug;then
+        cat $temp_exclude_file
+    fi
 
     $SUDO mksquashfs ${srcdir} ${dstsfs} -comp lzo -regex -ef $temp_exclude_file
     $SUDO touch ${srcdir}/$unionfs_clean_file
@@ -896,19 +898,19 @@ gen_common_sfs()
 gen_root_sfs()
 {
     gen_common_sfs $1 $2 \
-        'sys/.* proc/.* run/.* \
-        var/tmp/.* tmp/.* \
-        media/.* mnt/.* dev/disk/.*/.* \
-        etc/mtab etc/fstab \
-        etc/udev/rules.d/70-.*net.* \
-        etc/X11/xorg.conf* \
-        usr/portage/distfiles/.* \
-        etc/hal/fdi/policy/11-x11-vmmouse.fdi \
-        usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi \
-        usr/bin/vmmouse_detect \
-        var/cache/hald/fdi-cache \
-        var/cache/apt/archives/.* \
-        work/.* \
+        'sys/.* proc/.* run/.* 
+        var/tmp/.* tmp/.* 
+        media/.* mnt/.* dev/disk/.*/.* 
+        etc/mtab etc/fstab 
+        etc/udev/rules.d/70-.*net.* 
+        etc/X11/xorg.conf* 
+        usr/portage/distfiles/.* 
+        etc/hal/fdi/policy/11-x11-vmmouse.fdi 
+        usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
+        usr/bin/vmmouse_detect 
+        var/cache/hald/fdi-cache 
+        var/cache/apt/archives/.* 
+        work/.* 
         home/.*/.*'
 }
 
@@ -1127,7 +1129,7 @@ create_virtual_disk()
 
     print_env root_file work_file root_size work_size disk_format
 
-    dialog_continue "Create $disk_format virtual disk [$root_file] [$work_file]."
+    dialog_continue "Create virtual disk with $disk_format: [$root_file] [$work_file]"
     zm_auto_select="yes"
 
     if [ ! -e "$root_file" ];then
