@@ -88,7 +88,7 @@ umb()
 {
     local bak_name=$1
 
-    local bak_workdir=$zm_backup_workdir/$bak_name
+    local bak_workdir=$zm_backup_workdir/$bak_name/
     if [ -n "$bak_name" -a -e "$bak_workdir" ];then
         if echo "$bak_workdir" | grep $(readlink -e $PWD) > /dev/null;then
             cd ..
