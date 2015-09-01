@@ -52,14 +52,14 @@ log_info()
 
 backup_file()
 {
-    local suffix=$(date +%m%d_%H%M)
+    local time_dir=$(date +%y%m%d_%H%M)
     while [ $# -gt 0 ]; do
         bak_file=$1
         shift
         if [ -e "$bak_file" ];then
-            bak_file_dir=$(dirname $bak_file)/old
+            bak_file_dir=$(dirname $bak_file)/old/$time_dir
             $SUDO mkdir -p $bak_file_dir
-            $SUDO mv -fv ${bak_file} ${bak_file_dir}/$(basename ${bak_file}).${suffix}
+            $SUDO mv -fv ${bak_file} ${bak_file_dir}/
         fi
     done
 }
@@ -454,7 +454,7 @@ zm_copy_source()
     local _dst_dir=$1
 
     $SUDO mkdir -p $_dst_dir/
-    $SUDO $CP $zm_workdir/{zm,common,initramfs,mbak,user,Makefile} $_dst_dir/
+    $SUDO $CP $zm_workdir/{zm,common,initramfs,mbak,user,Makefile,test} $_dst_dir/
     # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
 
@@ -1511,8 +1511,8 @@ uninstall_zm()
 run_zm_debconf()
 {
     run_file=$1
-    chmod +x $build_dir/$run_file
-    $build_dir/$run_file
+    chmod +x $run_file
+    $run_file
 }
 
 zm_setup_tzdata() 
