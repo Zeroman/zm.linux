@@ -30,6 +30,8 @@ backup_workdir=/media/bak
 
 
 log_file=/tmp/.zm.log
+> $log_file
+chmod 666 $log_file
 
 err()
 {   
@@ -50,13 +52,14 @@ log_info()
 
 backup_file()
 {
+    local suffix=$(date +%m%d_%H%M)
     while [ $# -gt 0 ]; do
         bak_file=$1
         shift
         if [ -e "$bak_file" ];then
             bak_file_dir=$(dirname $bak_file)/old
             $SUDO mkdir -p $bak_file_dir
-            $SUDO mv -fv ${bak_file} ${bak_file_dir}
+            $SUDO mv -fv ${bak_file} ${bak_file_dir}/$(basename ${bak_file}).${suffix}
         fi
     done
 }
@@ -172,9 +175,9 @@ usage ()
 
     add_help()
     {
-       options[$index]="$1"
-       msgs[$index]="$2"
-       index=$(expr $index + 1)
+        options[$index]="$1"
+        msgs[$index]="$2"
+        index=$(expr $index + 1)
     }
 
     add_help "--install-grub device" "install grub on device, device like /dev/sda1"
@@ -196,9 +199,11 @@ usage ()
     add_help "--zm-userdir" "zm system user's config dir"
     add_help "--backup-dir dir [name]" "backup dir to sfs"
     add_help "--backup-branch name" "backup dir branch"
+    add_help "--remove-backup-branch name 0-$unionfs_max_branch" "remove backup branch"
     add_help "--mount-backup name" "mount backup"
     add_help "--remove-backup name" "remove backup"
     add_help "--umount-backup name" "umount backup"
+    add_help "--backup-info name" "print backup sfs info"
     add_help "-i,--install-soft name" "install soft"
     add_help "--install-softs" "install all softs in config.sh"
 
@@ -207,7 +212,7 @@ usage ()
     add_help "--print-backup-mountdir" "print backup mountdir"
     add_help "--print-os-id" "print os id"
     add_help "--version" "print version"
-      
+
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
     do
@@ -241,6 +246,7 @@ print_line()
 
 print_env()
 {
+    clear
     print_line
     debug_var deb_ver
     debug_var kernel_name
@@ -388,6 +394,20 @@ sfs2dev()
     umount_device $mnt_dir
 }
 
+get_all_sfs()
+{
+    local sfsfile=$1
+    if [ -e "$sfsfile" ];then
+        echo ${sfsfile}
+        for branch in $(seq 1 $unionfs_max_branch)
+        do
+            if [ -e "${sfsfile}.${branch}" ];then
+                echo ${sfsfile}.${branch}
+            fi
+        done
+    fi
+}
+
 update_label()
 {
     device=$1
@@ -517,6 +537,7 @@ format_usb_device()
     dd if=/dev/zero of=$usb_device bs=512 count=63
     sync;sleep 1;
     blockdev --rereadpt $usb_device
+
     sfdisk --label dos $usb_device -H 255 -S 63 -C $total_cyln << EOF
 ,$fat_cyln,0xc,*
 ,,0x83,-
@@ -563,28 +584,28 @@ gen_iso_file()
     install_grub_on_dir $iso_dir
     temp_path=/linux/$zm_arch/${zm_user}
     echo "
-menuentry \"ZM($zm_arch) (default)\" --class debian {
-set gfxpayload=keep
-search --no-floppy -l --set=root $iso_label
-echo 'Loading kernel...'
-linux $temp_path/$kernel_name sfs_part=cdrom zm_user=$zm_user zm_arch=$zm_arch
-echo 'Loading initrd...'
-initrd $temp_path/$initrd_name
+    menuentry \"ZM($zm_arch) (default)\" --class debian {
+    set gfxpayload=keep
+    search --no-floppy -l --set=root $iso_label
+    echo 'Loading kernel...'
+    linux $temp_path/$kernel_name sfs_part=cdrom zm_user=$zm_user zm_arch=$zm_arch
+    echo 'Loading initrd...'
+    initrd $temp_path/$initrd_name
 }
 " > $iso_dir/boot/grub/grub.cfg
 
-    #生成iso grub 引导file
-    pushd .
-    cd $iso_dir/boot/grub/i386-pc
-    bootfile=g2hdr
-    # grub-mkimage -O i386-pc -o core.img biosdisk ext2 fat iso9660
-    grub-mkimage -O i386-pc -o core.img biosdisk iso9660
-    cat /usr/lib/grub/i386-pc/cdboot.img core.img > ../$bootfile
-    popd
+#生成iso grub 引导file
+pushd .
+cd $iso_dir/boot/grub/i386-pc
+bootfile=g2hdr
+# grub-mkimage -O i386-pc -o core.img biosdisk ext2 fat iso9660
+grub-mkimage -O i386-pc -o core.img biosdisk iso9660
+cat /usr/lib/grub/i386-pc/cdboot.img core.img > ../$bootfile
+popd
 
-    rm -f $iso_filename
-    # “-b”后的文件路径不能是绝对路径，也不能是相对当前目录的路径，只能是相对于ISO源内容目录的路径。
-    genisoimage -V $iso_label -R -J -no-emul-boot -boot-load-size 4 -boot-info-table -b boot/grub/$bootfile -o $iso_filename $iso_dir
+rm -f $iso_filename
+# “-b”后的文件路径不能是绝对路径，也不能是相对当前目录的路径，只能是相对于ISO源内容目录的路径。
+genisoimage -V $iso_label -R -J -no-emul-boot -boot-load-size 4 -boot-info-table -b boot/grub/$bootfile -o $iso_filename $iso_dir
 }
 
 mount_storage()
@@ -756,26 +777,35 @@ zm_build_deb()
 
 }
 
-get_sfs_new_branch_num()
+get_sfs_cur_branch_num()
 {
     local sfsfile=$1
-    local branch=$unionfs_max_branch
 
     if [ ! -e "${sfsfile}" ];then
         err "${sfsfile} is not exist."
     fi
 
+    local branch=0
+    local cur_branch=0
     for branch in $(seq 1 $unionfs_max_branch)
     do
         if [ ! -e ${sfsfile}.${branch} ];then
             break
         fi
+        cur_branch=$branch
     done
 
-    if [ "$branch" -ge $unionfs_max_branch ];then
-        err "$sfsile have max branch."
+    echo $cur_branch
+}
+
+get_sfs_new_branch_num()
+{
+    local branch=$(get_sfs_cur_branch_num $1)
+
+    if [ "$branch" = "$unionfs_max_branch" ];then
+        err "$sfsfile have max branch."
     fi
-    echo $branch
+    echo $(expr $branch + 1)
 }
 
 zm_chroot()
@@ -817,7 +847,7 @@ zm_chroot()
 
     chroot_process=$(lsof -t $chroot_dir) || true
     if [ -n "$chroot_process" ];then
-       kill -9 $chroot_process
+        kill -9 $chroot_process
     fi
 
     if [ -d /work/cache ];then
@@ -870,15 +900,13 @@ gen_initrd()
 
 gen_common_sfs()
 {
-
     srcdir=$1
     dstsfs=$2
     shift 2
 
     check_binary mksquashfs
 
-    backup_file ${dstsfs}
-    backup_file ${dstsfs}.[0-9]
+    backup_file ${dstsfs} ${dstsfs}.[0-9]
 
     temp_exclude_file=$(mktemp)
     echo "lost+found" >> $temp_exclude_file
@@ -899,32 +927,32 @@ gen_root_sfs()
 {
     gen_common_sfs $1 $2 \
         'sys/.* proc/.* run/.* 
-        var/tmp/.* tmp/.* 
-        media/.* mnt/.* dev/disk/.*/.* 
-        etc/mtab etc/fstab 
-        etc/udev/rules.d/70-.*net.* 
-        etc/X11/xorg.conf* 
-        usr/portage/distfiles/.* 
-        etc/hal/fdi/policy/11-x11-vmmouse.fdi 
-        usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
-        usr/bin/vmmouse_detect 
-        var/cache/hald/fdi-cache 
-        var/cache/apt/archives/.* 
-        work/.* 
-        home/.*/.*'
+    var/tmp/.* tmp/.* 
+    media/.* mnt/.* dev/disk/.*/.* 
+    etc/mtab etc/fstab 
+    etc/udev/rules.d/70-.*net.* 
+    etc/X11/xorg.conf* 
+    usr/portage/distfiles/.* 
+    etc/hal/fdi/policy/11-x11-vmmouse.fdi 
+    usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
+    usr/bin/vmmouse_detect 
+    var/cache/hald/fdi-cache 
+    var/cache/apt/archives/.* 
+    work/.* 
+    home/.*/.*'
 }
 
 gen_home_sfs()
 {
     gen_common_sfs $1 $2 \
         '.*/.xauth*
-        .*/.serverauth
-        .*/Downloads/.*
-        .*/.cache
-        .*/.backup/.*
-        .*/.xsession-errors
-        .*/.kermit.log
-        .*libreoffice.*' 
+    .*/.serverauth
+    .*/Downloads/.*
+    .*/.cache
+    .*/.backup/.*
+    .*/.xsession-errors
+    .*/.kermit.log
+    .*libreoffice.*' 
 }
 
 update_system()
@@ -948,16 +976,16 @@ update_system()
     for sel in $sels;do
         case $sel in
             kernel)
-                gen_kernel $install_dir
+                gen_kernel $zm_dir
                 ;;
             initrd)
-                gen_initrd $install_dir
+                gen_initrd $zm_dir
                 ;;
             root)
-                gen_root_sfs / $install_dir/${root_sfs_name}
+                gen_root_sfs / $zm_dir/${root_sfs_name}
                 ;;
             home)
-                gen_home_sfs /home $install_dir/${home_sfs_name}
+                gen_home_sfs /home $zm_dir/${home_sfs_name}
                 ;;
             *)
                 ;;
@@ -984,15 +1012,17 @@ branch_system()
     local sfsfile
     local branch
 
+    print_env
+
     for sel in $sels;do
         case $sel in
             root)
-                sfsfile=$install_dir/${root_sfs_name}
+                sfsfile=$zm_dir/${root_sfs_name}
                 branch=$(get_sfs_new_branch_num $sfsfile)
                 gen_root_sfs ${unionfs_root_mpath}/ ${sfsfile}.${branch}
                 ;;
             home)
-                sfsfile=$install_dir/${home_sfs_name}
+                sfsfile=$zm_dir/${home_sfs_name}
                 branch=$(get_sfs_new_branch_num $sfsfile)
                 gen_home_sfs ${unionfs_home_mpath}/ ${sfsfile}.${branch}
                 ;;
@@ -1048,7 +1078,7 @@ gen_default_grub_config()
     mount_device $grub_device $temp_dir
     temp_path=/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
     echo "
-menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
+    menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
     set zm_dir=$temp_path
@@ -1057,9 +1087,9 @@ menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
     echo 'Loading $zm_arch initrd...'
     initrd \$zm_dir/${initrd_name}
 }" > $temp_dir/boot/grub/config/default.cfg
-    sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
-    umount_device $temp_dir
-    rmdir $temp_dir
+sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
+umount_device $temp_dir
+rmdir $temp_dir
 }
 
 gen_iso_system()
@@ -1601,20 +1631,37 @@ zm_mount_backup()
     echo $work_mountdir/$bak_name 
 }
 
+get_backup_unionfs_dir()
+{
+    local bak_name="$1"
+
+    if modprobe overlay > /dev/null 2>&1;then
+        echo "$backup_mountdir/unionfs/${bak_name}/upper"
+    elif modprobe aufs > /dev/null 2>&1;then
+        echo "$backup_mountdir/unionfs/${bak_name}/aufs"
+    else
+        err "no support union filesystem."
+    fi
+}
+
 zm_backup_branch()
 {
     local bak_name="$1"
     local sfsfile=$backup_mountdir/${bak_name}.sfs
-    local bak_path=$backup_mountdir/unionfs/${bak_name}
+
+    local bak_path=$(get_backup_unionfs_dir "$bak_name")
 
     branch=$(get_sfs_new_branch_num $sfsfile)
-    gen_common_sfs ${bak_path} ${sfsfile}.${branch}
+    gen_common_sfs $bak_path ${sfsfile}.${branch}
 }
 
 show_backup_info()
 {
     for bak_name in $@;do
-        ls -ltGch $backup_mountdir/${bak_name}.sfs 
+        local all_sfs=$(get_all_sfs $backup_mountdir/${bak_name}.sfs)
+        if [ ! -z "$all_sfs" ];then
+            ls -ltGch $all_sfs
+        fi
         # find $backup_mountdir -maxdepth 1 -name ${bak_name}.sfs -printf "%P %c\n" 
     done
 }
@@ -1654,13 +1701,11 @@ zm_backup_dir()
 
     gen_common_sfs $bak_path $new_bak_sfs
 
-    if [ -e "$bak_sfs" ];then
-        $SUDO chattr -i $bak_sfs 
-        $SUDO chattr -i $bak_sfs.[0-9] || true
+    local all_sfs=$(get_all_sfs $bak_sfs)
+    if [ -n "$all_sfs" ];then
+        $SUDO chattr -i $all_sfs
+        backup_file $all_sfs
     fi
-
-    backup_file $bak_sfs
-    backup_file ${bak_sfs}.[0-9]
 
     $SUDO mv $new_bak_sfs $bak_sfs
     $SUDO chattr +i $bak_sfs
@@ -1682,6 +1727,7 @@ zm_check_backup()
 
 zm_remove_backup()
 {
+    local backup_unionfs_dir
     for bak_name in $@
     do
         bak_sfs=$backup_mountdir/${bak_name}.sfs
@@ -1689,8 +1735,46 @@ zm_remove_backup()
         if [ ! -e $bak_sfs ];then
             return 1
         fi
-        $SUDO chattr -i $bak_sfs
-        backup_file ${bak_sfs}
+
+        local all_sfs=$(get_all_sfs $bak_sfs)
+        if [ -n "$all_sfs" ];then
+            $SUDO chattr -i $all_sfs
+            backup_file $all_sfs
+        fi
+        backup_unionfs_dir=$backup_mountdir/unionfs/${bak_name}
+        if [ -d $bakcup_unionfs_dir ];then
+            $SUDO rm -rf "$backup_unionfs_dir"
+        fi
+    done
+}
+
+zm_remove_backup_branch()
+{
+    local bak_name=$1
+    local del_branch=$2
+
+    bak_sfs=$backup_mountdir/${bak_name}.sfs
+
+    if [ ! -e $bak_sfs -o -z "$del_branch" ];then
+        err "$FUNCNAME param error"
+    fi
+
+    local cur_branch=$(get_sfs_cur_branch_num $bak_sfs)
+    start_branch=$(expr $cur_branch - $del_branch + 1)
+
+    if [ $start_branch -lt 0 -o $start_branch -gt $(expr $cur_branch + 1) ];then
+        err "$FUNCNAME branch param error."
+    fi
+
+    local backup_unionfs_dir=$(get_backup_unionfs_dir $bak_name)
+    if [ -d "$backup_unionfs_dir" ];then
+        $SUDO rm -rf "$backup_unionfs_dir"
+    fi
+
+    for branch in $(seq $start_branch $cur_branch);do
+        local sfs=$backup_mountdir/${bak_name}.sfs.${branch}
+        $SUDO chattr -i $sfs
+        backup_file $sfs
     done
 }
 
@@ -1743,7 +1827,7 @@ zm_umount_backup()
         local bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
         for dir in upper aufs work/work work " ";do
             if [ -d $bak_unionfs_dir/$dir ];then
-                $SUDO rmdir $bak_unionfs_dir/$dir
+                $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/$dir
             fi
         done
 
@@ -1767,7 +1851,7 @@ zm_argv_del()
 
 zm_config()
 {
-    
+
     while [ $# -gt 0 ]; do
         case $1 in
             --root-sfs) zm_argv_del $1;shift; root_sfs_name=$1; zm_argv_del $1;shift; 
@@ -1804,98 +1888,98 @@ zm_config()
                 ;;
             *) shift; 
                 ;;
-      esac
-  done
+        esac
+    done
 
-  if $zm_debug;then
-      set -x
-      CP='/bin/cp -rafv'
-  fi
+    if $zm_debug;then
+        set -x
+        CP='/bin/cp -rafv'
+    fi
 
-  if [ -z "$build_dir" ];then
-      if $zm_debug;then
-          build_dir=/tmp/zm_build
-          mkdir -p $build_dir
-      else
-          #can use TMPDIR change, see man mktemp
-          build_dir=$(mktemp -d)
-      fi
-  fi
+    if [ -z "$build_dir" ];then
+        if $zm_debug;then
+            build_dir=/tmp/zm_build
+            mkdir -p $build_dir
+        else
+            #can use TMPDIR change, see man mktemp
+            build_dir=$(mktemp -d)
+        fi
+    fi
 
-  test -d "$build_dir" || err "build_dir ($build_dir) isn't dir."
-  if [ $(get_usedsize_dir_mb "$build_dir") -gt 5000 ];then
-      dialog_continue "build dir($build_dir) have more data, please check again."
-  fi
+    test -d "$build_dir" || err "build_dir ($build_dir) isn't dir."
+    if [ $(get_usedsize_dir_mb "$build_dir") -gt 5000 ];then
+        dialog_continue "build dir($build_dir) have more data, please check again."
+    fi
 
-  mnt_dir=$build_dir/mnt
-  iso_dir=$build_dir/iso
-  sfs_mnt_dir=$build_dir/sfs
-  unionfs_dir=$build_dir/unionfs
-  root_dir=$build_dir/root
-  dl_dir=$build_dir/dl
+    mnt_dir=$build_dir/mnt
+    iso_dir=$build_dir/iso
+    sfs_mnt_dir=$build_dir/sfs
+    unionfs_dir=$build_dir/unionfs
+    root_dir=$build_dir/root
+    dl_dir=$build_dir/dl
 
-  soft_list_file=$build_dir/soft_list
-  > $build_dir/soft_list
-
-
-  mkdir -p $mnt_dir
-  mkdir -p $iso_dir
-  mkdir -p $sfs_mnt_dir
-  mkdir -p $unionfs_dir
-  mkdir -p $root_dir
-  mkdir -p $dl_dir
-
-  #trap zm_uninit ERR INT QUIT TERM EXIT
-  trap zm_uninit ERR INT TERM EXIT
-
-  if [ -z "$zm_user" ];then
-      if [ -z "$SUDO_USER" ];then
-          zm_user=$USER
-      else
-          zm_user=$SUDO_USER
-      fi
-  fi
-
-  if [ -z "$zm_dir" ];then
-      zm_dir=$sfs_part_mpath/linux/$zm_arch
-      if [ -d "$zm_dir/$zm_user" ];then
-          zm_dir="$sfs_part_mpath/linux/$zm_arch/$zm_user"
-      fi
-      os_name="debian"
-      zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
-  fi
-  root_sfs_file=$zm_dir/${root_sfs_name}
-  home_sfs_file=$zm_dir/${home_sfs_name}
-  kernel_file=$zm_dir/${kernel_name}
-  initrd_file=$zm_dir/${initrd_name}
-
-  zm_user_home=$(grep $zm_user /etc/passwd | awk -F:  '{print $6}')
-  if [ -z "$zm_user_dir" ];then
-      if [ -d $zm_user_home/.zm ];then
-          zm_user_dir=$zm_user_home/.zm
-      else
-          if [ -d $zm_workdir/user/$zm_user ];then
-              zm_user_dir=$zm_workdir/user/$zm_user
-          fi
-      fi
-  fi
-  check_file_exist "$zm_user_dir"
-  zm_user_dir=$(readlink -f $zm_user_dir)
-
-  if [ -e $zm_user_dir/config.sh ];then
-      source $zm_user_dir/config.sh
-  fi
-
-  zm_user_command zm_user_init
+    soft_list_file=$build_dir/soft_list
+    > $build_dir/soft_list
 
 
-  if [ -z "$kernel_params" ];then
-      if $zm_debug;then
-          kernel_params="debug"
-      else
-          kernel_params="quiet"
-      fi
-  fi
+    mkdir -p $mnt_dir
+    mkdir -p $iso_dir
+    mkdir -p $sfs_mnt_dir
+    mkdir -p $unionfs_dir
+    mkdir -p $root_dir
+    mkdir -p $dl_dir
+
+    #trap zm_uninit ERR INT QUIT TERM EXIT
+    trap zm_uninit ERR INT TERM EXIT
+
+    if [ -z "$zm_user" ];then
+        if [ -z "$SUDO_USER" ];then
+            zm_user=$USER
+        else
+            zm_user=$SUDO_USER
+        fi
+    fi
+
+    if [ -z "$zm_dir" ];then
+        zm_dir=$sfs_part_mpath/linux/$zm_arch
+        if [ -d "$zm_dir/$zm_user" ];then
+            zm_dir="$sfs_part_mpath/linux/$zm_arch/$zm_user"
+        fi
+        os_name="debian"
+        zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+    fi
+    root_sfs_file=$zm_dir/${root_sfs_name}
+    home_sfs_file=$zm_dir/${home_sfs_name}
+    kernel_file=$zm_dir/${kernel_name}
+    initrd_file=$zm_dir/${initrd_name}
+
+    zm_user_home=$(grep $zm_user /etc/passwd | awk -F:  '{print $6}')
+    if [ -z "$zm_user_dir" ];then
+        if [ -d $zm_user_home/.zm ];then
+            zm_user_dir=$zm_user_home/.zm
+        else
+            if [ -d $zm_workdir/user/$zm_user ];then
+                zm_user_dir=$zm_workdir/user/$zm_user
+            fi
+        fi
+    fi
+    check_file_exist "$zm_user_dir"
+    zm_user_dir=$(readlink -f $zm_user_dir)
+
+    if [ -e $zm_user_dir/config.sh ];then
+        source $zm_user_dir/config.sh
+    fi
+
+    zm_user_command zm_user_init
+
+
+    if [ -z "$kernel_params" ];then
+        if $zm_debug;then
+            kernel_params="debug"
+        else
+            kernel_params="quiet"
+        fi
+    fi
 }
 
 zm_excute()
@@ -1949,6 +2033,8 @@ zm_excute()
             --backup-dir) shift; zm_backup_dir $@; exit 0;
                 ;;
             --backup-branch) shift; zm_backup_branch $1; exit 0;
+                ;;
+            --remove-backup-branch) shift; zm_remove_backup_branch $@; exit 0;
                 ;;
             --mount-backup) shift; zm_mount_backup $@; exit 0;
                 ;;
@@ -2111,6 +2197,10 @@ case $1 in
         ;;
     --print-os-id)
         lsb_release -i -s
+        exit 0
+        ;;
+    --print-max-branch)
+        echo $unionfs_max_branch
         exit 0
         ;;
     *)
