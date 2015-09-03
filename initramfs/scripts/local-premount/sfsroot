@@ -403,7 +403,7 @@ __mount_with_aufs()
     sfsmpath=$sfsmountdir/$sfsname
     mount_storage $sfsfile $sfsmpath
     mount -t aufs -o br:$upperdir none $mountdir
-    mount -t aufs -o remount,udba=none,append:${sfsmpath}=ro none $mountdir
+    mount -t aufs -o remount,udba=none,append:${sfsmpath}=rr none $mountdir
     for branch in $(seq 1 $unionfs_max_branch)
     do
         if [ -e "${sfsfile}.${branch}" ];then

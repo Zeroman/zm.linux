@@ -663,13 +663,13 @@ __mount_with_aufs()
     local sfsmpath=$sfsmountdir/$sfsname
 
     mount_storage $sfsfile $sfsmpath
-    lowerdir=$(__set_lowerdir ${sfsmpath} $lowerdir)
+    lowerdir=$(__set_lowerdir ${sfsmpath}=rr $lowerdir)
 
     for branch in $(seq 1 $unionfs_max_branch)
     do
         if [ -e "${sfsfile}.${branch}" ];then
             mount_storage ${sfsfile}.${branch} ${sfsmpath}.${branch}
-            lowerdir=$(__set_lowerdir ${sfsmpath}.${branch} $lowerdir)
+            lowerdir=$(__set_lowerdir ${sfsmpath}.${branch}=ro+wh $lowerdir)
             # $SUDO mount -t aufs -o remount,udba=none,add:1:${sfsmpath}.${branch}=ro+wh none $mountdir
             continue
         fi
