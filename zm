@@ -454,7 +454,7 @@ zm_copy_source()
     local _dst_dir=$1
 
     $SUDO mkdir -p $_dst_dir/
-    $SUDO $CP $zm_workdir/{zm,common,initramfs,mbak,user,Makefile,test} $_dst_dir/
+    $SUDO $CP $zm_workdir/{zm,common,initramfs,user,Makefile,test} $_dst_dir/
     # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
 
@@ -495,11 +495,14 @@ install_grub_on_dir()
 {
     install_dir=$1
     check_file_exist $install_dir
-    if [ ! -d $install_dir/boot ];then
-        $CP $sfs_part_mpath/boot $install_dir
-    fi
-    # mkdir -p $install_dir/boot/grub
-    # $CP /usr/lib/grub/i386-pc $install_dir/boot/grub/
+
+    # if [ ! -d $install_dir/boot ];then
+        # $CP $sfs_part_mpath/boot $install_dir
+    # fi
+
+    mkdir -p $install_dir/boot/grub
+    $CP /usr/lib/grub/i386-pc $install_dir/boot/grub/
+    $CP $zm_workdir/grub/* $install_dir/boot/grub/
 }
 
 format_usb_device()
@@ -826,6 +829,11 @@ zm_chroot()
         chroot_dir=$root_dir
     else
         chroot_dir=$(readlink -f "$param1")
+    fi
+
+    if which systemd-nspawn > /dev/null;then
+        $SUDO systemd-nspawn -D "$chroot_dir" --bind /work/cache $@
+        return 0
     fi
 
     test -e $chroot_dir/bin/bash
@@ -1320,9 +1328,11 @@ add_soft()
 apt_update()
 {
     if [ ! -e /tmp/.zm_apt_update ];then
-        echo "Testing internet connect status..."
-        # nc -v -w 3 www.baidu.com -z 80
-        nc -w 3 www.baidu.com -z 80
+        if which nc > /dev/null;then
+            echo "Testing internet connect status..."
+            # nc -v -w 3 www.baidu.com -z 80
+            nc -w 3 www.baidu.com -z 80
+        fi
 
         echo "update system..."
         $APTGET update
@@ -1368,12 +1378,12 @@ add_base_softs()
     add_soft acpi-support acpi
     add_soft hdparm usbutils lshw 
     add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox mbr 
-    add_soft iproute realpath gpm rsync util-linux gpart debootstrap pciutils 
+    add_soft iproute realpath rsync util-linux gpart debootstrap pciutils 
     add_soft e2fsprogs
     add_soft lftp less bc
     add_soft ssh openssh-server nfs-common 
     add_soft vim gzip xz-utils 
-    add_soft network-manager 
+    add_soft netcat network-manager 
     add_soft dh-make
     # pigz lzip plzip pxz p7zip-full
 
@@ -1919,7 +1929,7 @@ zm_config()
     dl_dir=$build_dir/dl
 
     soft_list_file=$build_dir/soft_list
-    > $build_dir/soft_list
+    rm -f $soft_list_file
 
 
     mkdir -p $mnt_dir

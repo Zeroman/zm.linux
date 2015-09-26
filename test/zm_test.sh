@@ -11,6 +11,8 @@
 
 # TEST_DIR=$(mktemp -d)
 TEST_DIR=/tmp/zm_test
+mkdir -p $TEST_DIR
+
 ZM=zm
 if [ -x /work/zm/zm ];then
     ZM=/work/zm/zm
@@ -197,12 +199,43 @@ test_umount_bakcup()
 
 }
 
+test_exe_path()
+{
+    local backup_dir=$TEST_DIR/zmtest
+    local work_dir=$work_mountdir/zmtest
+
+    rm -rf $backup_dir
+    mkdir -p $backup_dir
+
+    echo '
+#include <stdio.h>
+#include <unistd.h>
+
+int main(int argc, char const* argv[])
+{
+    char buf[4096];
+    readlink("/proc/self/exe", buf, sizeof(buf));
+    printf("%s\n", buf);
+    return 0;
+}
+    ' > $backup_dir/test_exe_path.c
+    gcc $backup_dir/test_exe_path.c -o $backup_dir/test_exe_path.elf
+
+    $ZM --backup-dir $backup_dir > /dev/null
+
+
+    mount_test_backup 
+    $work_dir/test_exe_path.elf
+    umount_test_backup
+    $ZM --remove-backup zmtest
+}
 
 test_all()
 {
     test_backup_dir
-    # test_mount_backup
-    # test_umount_bakcup
+    test_backup_branch
+    test_mount_backup
+    test_umount_bakcup
 }
 
 show_err()
