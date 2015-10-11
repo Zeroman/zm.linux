@@ -831,8 +831,31 @@ zm_chroot()
         chroot_dir=$(readlink -f "$param1")
     fi
 
+    local chroot_cmd="$SUDO systemd-nspawn -M $zm_user -bD $chroot_dir --bind /work/cache --bind $zm_dir"
     if which systemd-nspawn > /dev/null;then
-        $SUDO systemd-nspawn -D "$chroot_dir" --bind /work/cache $@
+        local cmd="$*"
+        local requires="basic.target"
+        if [ -z "$cmd" ];then
+            cmd='/bin/bash'
+        fi
+        # $SUDO sed -i "s#ExecStart=.*#ExecStart=-/bin/sh -c \"$*;poweroff\"#g" 
+        echo "
+[Unit]
+Description=Auto install service 
+After=$requires
+Requires=$requires
+
+[Service]
+ExecStart=-/bin/sh -c \"$cmd;poweroff\"
+StandardInput=tty-force
+StandardOutput=inherit
+StandardError=inherit
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes
+" > $chroot_dir/lib/systemd/system/zm.chroot.service
+        $chroot_cmd systemd.unit=zm.chroot.service
+        rm -f $chroot_dir/lib/systemd/system/zm.chroot.service
         return 0
     fi
 
@@ -850,6 +873,9 @@ zm_chroot()
         mount_device --bind /work/cache/ $chroot_dir/work/cache
     fi
 
+    mkdir -p $root_dir/$zm_dir
+    mount_device --bind $zm_dir $root_dir/$zm_dir
+
     echo "chroot to $chroot_dir "
     SHELL=/bin/bash unshare --fork --pid chroot $chroot_dir $@
 
@@ -857,6 +883,8 @@ zm_chroot()
     if [ -n "$chroot_process" ];then
         kill -9 $chroot_process
     fi
+
+    umount_device $chroot_dir/$zm_dir
 
     if [ -d /work/cache ];then
         umount_device $chroot_dir/work/cache
@@ -908,13 +936,11 @@ gen_initrd()
 
 gen_common_sfs()
 {
-    srcdir=$1
-    dstsfs=$2
+    local srcdir=$1
+    local dstsfs=$2
     shift 2
 
     check_binary mksquashfs
-
-    backup_file ${dstsfs} ${dstsfs}.[0-9]
 
     temp_exclude_file=$(mktemp)
     echo "lost+found" >> $temp_exclude_file
@@ -925,7 +951,10 @@ gen_common_sfs()
         cat $temp_exclude_file
     fi
 
-    $SUDO mksquashfs ${srcdir} ${dstsfs} -comp lzo -regex -ef $temp_exclude_file
+    $SUDO mksquashfs ${srcdir} ${dstsfs}.new -comp lzo -regex -ef $temp_exclude_file
+
+    backup_file ${dstsfs} ${dstsfs}.[0-9]
+    $SUDO mv ${dstsfs}.new ${dstsfs}
     $SUDO touch ${srcdir}/$unionfs_clean_file
 
     rm -f $temp_exclude_file
@@ -1225,6 +1254,8 @@ default_zm_setup()
 
 auto_install()
 {
+    test -d /run/lock/ || mkdir -p /run/lock
+
     # export DEBIAN_FRONTEND=gnome
     export DEBIAN_FRONTEND=noninteractive
 
@@ -1232,10 +1263,10 @@ auto_install()
 
     zm_user_command zm_setup
 
-    gen_kernel /media/install
-    gen_initrd /media/install
-    gen_root_sfs / /media/install/${root_sfs_name}
-    # gen_home_sfs /home /media/install/${home_sfs_name}
+    gen_root_sfs / $zm_dir/${root_sfs_name}
+    # gen_home_sfs /home $zm_dir/${home_sfs_name}
+    gen_kernel $zm_dir
+    gen_initrd $zm_dir
 
     sync;sync;sync
 }
@@ -1260,17 +1291,19 @@ make_system()
 
     $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install-zm $root_dir/
 
-    mkdir -p $zm_dir
-    mkdir -p $root_dir/media/install
-    mount_device --bind $zm_dir $root_dir/media/install
-
+    local cmd=""
+    local zm_options=""
+    zm_options+=" --zm-user $zm_user"
+    zm_options+=" --zm-dir $zm_dir"
+    zm_options+=" --deb-ver $deb_ver"
+    zm_options+=" --arch $zm_arch"
+    zm_options+=" auto_install"
     if $zm_debug;then
-        zm_chroot $root_dir "zm --debug --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
-    else
-        zm_chroot $root_dir "zm --zm-user $zm_user --deb-ver $deb_ver --arch $zm_arch auto_install"
+        zm_options+=" --debug"
     fi
-
-    umount_device $root_dir/media/install
+    cmd+="zm $zm_options"
+    $SUDO systemctl stop virtualbox.service || true
+    zm_chroot $root_dir $cmd
 }
 
 install_system()
