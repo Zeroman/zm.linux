@@ -99,8 +99,8 @@ download_file()
 
 select_yesno()
 {
-    info="$1"
-    title="$2"
+    local info="$1"
+    local title="$2"
 
     if [ "$zm_auto_select" = "yes" ];then
         return 0
@@ -206,6 +206,7 @@ usage ()
     add_help "--backup-info name" "print backup sfs info"
     add_help "-i,--install-soft name" "install soft"
     add_help "--install-softs" "install all softs in config.sh"
+    add_help "--make-virtual-system" "install system to virtual image file"
 
     add_help "--print-workdir" "print workdir"
     add_help "--print-backup-workdir" "print backup workdir"
@@ -408,6 +409,23 @@ get_all_sfs()
     fi
 }
 
+umount_all_sfs()
+{
+    local sfs_mnt_dir="$1"
+    local sfs_name="$2"
+
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        branch_sfs_mnt_dir=${sfs_mnt_dir}/${sfs_name}.${branch}
+        if [ -d "$branch_sfs_mnt_dir" ];then
+            $SUDO umount $branch_sfs_mnt_dir
+            continue
+        fi
+        break
+    done  
+    $SUDO umount $sfs_mnt_dir/$sfs_name
+}
+
 update_label()
 {
     device=$1
@@ -454,7 +472,7 @@ zm_copy_source()
     local _dst_dir=$1
 
     $SUDO mkdir -p $_dst_dir/
-    $SUDO $CP $zm_workdir/{zm,common,initramfs,user,Makefile,test} $_dst_dir/
+    $SUDO $CP $zm_workdir/{zm,common,initramfs,user,grub,Makefile,test} $_dst_dir/
     # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
 
@@ -479,7 +497,7 @@ install_grub()
         echo "Overwrite $mnt_dir/boot/grub/config/default.cfg ?"
         dialog_continue now
     fi
-    grub-mkdevicemap -m $mnt_dir/boot/grub/device.map
+    $SUDO grub-mkdevicemap -m $mnt_dir/boot/grub/device.map
     # mount_device --bind /dev $mnt_dir/dev
     # chroot $mnt_dir grub-mkconfig -o /boot/grub/grub.cfg
     # umount_device $mnt_dir/dev
@@ -487,7 +505,7 @@ install_grub()
     if [ "$disk_device" == "$grub_device" ];then
         disk_device=${grub_device/[0-9]*}
     fi
-    grub-install $disk_device --no-floppy --root-directory=$mnt_dir --modules="biosdisk part_msdos"
+    $SUDO grub-install $disk_device --no-floppy --root-directory=$mnt_dir --modules="biosdisk part_msdos"
     umount_device $mnt_dir
 }
 
@@ -495,14 +513,87 @@ install_grub_on_dir()
 {
     install_dir=$1
     check_file_exist $install_dir
+    check_file_exist /usr/lib/grub/i386-pc
 
     # if [ ! -d $install_dir/boot ];then
         # $CP $sfs_part_mpath/boot $install_dir
     # fi
 
-    mkdir -p $install_dir/boot/grub
-    $CP /usr/lib/grub/i386-pc $install_dir/boot/grub/
-    $CP $zm_workdir/grub/* $install_dir/boot/grub/
+    echo $CP
+    $SUDO mkdir -p $install_dir/boot/grub
+    $SUDO $CP /usr/lib/grub/i386-pc $install_dir/boot/grub/
+    $SUDO $CP $zm_workdir/grub/* $install_dir/boot/grub/
+}
+
+init_lvm_partition()
+{
+    local -a params
+    local -A items
+
+    OLD_IFS=$IFS
+    IFS=: params=($@)
+    items['name']='zm'
+    items['parts']=''
+    items['sfsroot']='20G'
+    items['union']='20G'
+    items['swap']='4G'
+    items['backup']='50%VG'
+    items['work']='100%FREE'
+
+    for opt in ${params[*]}
+    do
+        item=${opt/=*}
+        value=${opt#*=}
+        # echo $item = $value
+        items["$item"]="$value"
+    done
+    # declare -p items
+    for k in "${!items[@]}"; do echo "$k = ${items[$k]}"; done
+
+    local -a parts
+    IFS=, parts=(${items['parts']})
+    for part in ${parts[*]}
+    do
+        test -b $part || err "no partition $part"
+    done
+
+    dialog_continue "create lvm part on ${parts[*]}."
+    IFS=$OLD_IFS
+
+    local vgname=${items['name']}
+    pvcreate ${parts[*]}
+    vgcreate $vgname ${parts[*]}
+
+    create_part()
+    {
+        local name=$1
+        local size=$2 
+
+        if [ -z "$size" ];then
+            return 0
+        fi
+
+        if [ "$size" = '-' ];then
+            size='100%FREE'
+        fi
+
+        if expr index "$size" '%' > /dev/null;then
+            lvcreate -l $size -n ${name} $vgname
+        else
+            lvcreate -L $size -n ${name} $vgname
+        fi
+
+        if [ "$name" = "swap" ];then
+            mkswap -f -L ${vgname}-swap /dev/mapper/${vgname}-${name}
+        else
+            mkfs.ext4 -L ${vgname}-${name} /dev/mapper/${vgname}-${name}
+        fi
+    }
+    create_part sfsroot ${items['sfsroot']}
+    create_part union ${items['union']}
+    create_part swap ${items['swap']}
+    create_part backup ${items['backup']}
+    create_part work ${items['work']}
 }
 
 format_usb_device()
@@ -1170,79 +1261,184 @@ gen_usb_system()
     install_system $usb_root_device 
 }
 
-create_virtual_disk()
+make_virtual_system()
 {
-    check_binary install-mbr 
+    # check_binary install-mbr 
     check_binary syslinux
 
+    local -a params
+    local -A items
 
-    disk_format=qcow2
-    # disk_format=vdi
-    # disk_format=vmdk
+    OLD_IFS=$IFS
+    IFS=: params=($@)
+    items['format']='qcow2' #vdi vmdk qcow2
+    items['orig_format']='qcow2' #vdi vmdk qcow2
+    items['sfsroot']='20G'
+    items['union']='20G'
+    items['swap']='4G'
+    items['backup']='128G'
+    items['work']='128G'
+    items['home']='128G'
+    items['dir']='/tmp/zm'
 
-    root_file=/tmp/zm_root.$disk_format
-    work_file=/tmp/zm_work.$disk_format
-    root_size=32G
-    work_size=64G
+    for opt in ${params[*]}
+    do
+        item=${opt/=*}
+        value=${opt#*=}
+        # echo $item = $value
+        items["$item"]="$value"
+    done
+ 
+    local disk_format=${items['format']}
+    local installdir=${items['dir']}
 
-    if [ -e "$root_file" ];then
-        dialog_continue "$root_file exists, delete it?"
-        rm -f $root_file
-    fi
-    if [ -e "$work_file" ];then
-        dialog_continue "$work_file exists, delete it?"
-        rm -f $work_file
-    fi
+    local sfsroot_file=$installdir/sfsroot.$disk_format
+    local swap_file=$installdir/swap.$disk_format
+    local work_file=$installdir/work.$disk_format
+    local home_file=$installdir/home.$disk_format
+    local union_file=$installdir/union.$disk_format
+    local backup_file=$installdir/backup.$disk_format
 
-    print_env root_file work_file root_size work_size disk_format
+    local orig_format=${items['orig_format']}
+    local sfsroot_qcow2_file=$installdir/sfsroot.$orig_format
+    local swap_qcow2_file=$installdir/swap.$orig_format
+    local work_qcow2_file=$installdir/work.$orig_format
+    local home_qcow2_file=$installdir/home.$orig_format
+    local union_qcow2_file=$installdir/union.$orig_format
+    local backup_qcow2_file=$installdir/backup.$orig_format
 
-    dialog_continue "Create virtual disk with $disk_format: [$root_file] [$work_file]"
+    local sfsroot_size=${items['sfsroot']}
+    local swap_size=${items['swap']}
+    local work_size=${items['work']}
+    local home_size=${items['home']}
+    local union_size=${items['union']}
+    local backup_size=${items['backup']}
+
+    mkdir -p $installdir
+
+    local info="Create virtual disk:\n"
+    info+=" install dir : $installdir\n" 
+    info+=" disk format : $disk_format\n" 
+    info+=" sfsroot     : $sfsroot_size\n" 
+    info+=" work        : $work_size\n"
+    info+=" backup      : $backup_size\n"
+    info+=" home        : $home_size\n"
+    info+=" union       : $union_size\n"
+    info+=" swap        : $swap_size\n"
+    IFS='#' dialog_continue "$info"
+    IFS=$OLD_IFS
     zm_auto_select="yes"
 
-    if [ ! -e "$root_file" ];then
-        qemu-img create -f $disk_format "$root_file" "$root_size"
+    $SUDO qemu-nbd -d /dev/nbd0 || true
+    $SUDO rmmod nbd || true
+    $SUDO modprobe nbd max_part=16
+
+    create_qemu_disk()
+    {
+        local img_file=$1
+        local img_size=$2
+
+        if [ -z "$img_size" ];then
+            return 0
+        fi
+
+        if [ -e "$img_file" ];then
+            dialog_continue "$img_file exists, delete it?"
+            rm -f $img_file
+        fi
+
+        if [ ! -e "$img_file" ];then
+            qemu-img create -f $orig_format "$img_file" "$img_size"
+        fi
+        $SUDO qemu-nbd --cache writeback -c /dev/nbd0 $img_file
+        $SUDO parted -s -a optimal /dev/nbd0 mklabel msdos
+        $SUDO parted -s -a optimal /dev/nbd0 mkpart primary ext2 0% 100%
+
+        while [ ! -e /dev/nbd0p1 ];do
+            $SUDO blockdev --rereadpt /dev/nbd0
+            sleep 1
+        done
+
+        if [ -e /usr/lib/syslinux/mbr.bin ];then
+            $SUDO dd if=/usr/lib/syslinux/mbr.bin of=/dev/nbd0
+        fi
+    }
+
+    convert_file()
+    {
+        local format=$1
+        local inputfile=$2
+        local outputfile=$3
+
+        if [ "$format" != "$orig_format" ];then
+            qemu-img convert -f "$orig_format" -O $format $inputfile $outputfile
+        fi
+    }
+
+    if [ -n "$sfsroot_size" ];then
+        create_qemu_disk $sfsroot_qcow2_file $sfsroot_size
+        $SUDO mkfs.ext4 -L sfsroot /dev/nbd0p1
+        install_system /dev/nbd0p1
+        $SUDO qemu-nbd -d /dev/nbd0
+        convert_file $disk_format $sfsroot_qcow2_file $sfsroot_file
     fi
-    if [ ! -e "$work_file" ];then
-        qemu-img create -f $disk_format "$work_file" "$work_size"
+
+    if [ -n "$home_size" ];then
+        create_qemu_disk $home_qcow2_file $home_size
+        $SUDO mkfs.ext4 -L home /dev/nbd0p1
+        mount_device -t tmpfs -o mode=755 tmpfs $unionfs_dir
+        mount_unionfs home $zm_dir $sfs_mnt_dir $unionfs_dir $root_dir
+        mount_device /dev/nbd0p1 $mnt_dir
+        $SUDO rsync -a $root_dir/ $mnt_dir
+        umount_device $mnt_dir
+        umount_device $root_dir
+        umount_device $unionfs_dir
+        umount_all_sfs $sfs_mnt_dir home
+        $SUDO qemu-nbd -d /dev/nbd0
+        convert_file $disk_format $home_qcow2_file $home_file
     fi
-    qemu-nbd -d /dev/nbd0 || true
-    qemu-nbd -d /dev/nbd1 || true
-    rmmod nbd || true
-    modprobe nbd max_part=16
-    qemu-nbd --cache writeback -c /dev/nbd0 $root_file
-    qemu-nbd --cache writeback -c /dev/nbd1 $work_file
-    # qemu-nbd --cache writethrough -c /dev/nbd0 $root_file
 
-    install-mbr --force /dev/nbd0
-    # sudo dd if=/usr/lib/syslinux/mbr.bin of=/dev/nbd0
+    if [ -n "$work_size" ];then
+        create_qemu_disk $work_qcow2_file $work_size
+        $SUDO mkfs.ext4 -L work /dev/nbd0p1
+        $SUDO qemu-nbd -d /dev/nbd0
+        convert_file $disk_format $work_qcow2_file $work_file
+    fi
 
-    parted -s -a optimal /dev/nbd0 mklabel msdos
-    parted -s -a optimal /dev/nbd0 mkpart primary ext2 64s 100%
-    parted -s -a optimal /dev/nbd1 mklabel msdos
-    parted -s -a optimal /dev/nbd1 mkpart primary ext2 64s 100%
+    if [ -n "$backup_size" ];then
+        create_qemu_disk $backup_qcow2_file $backup_size
+        $SUDO mkfs.ext4 -L backup /dev/nbd0p1
+        $SUDO qemu-nbd -d /dev/nbd0
+        convert_file $disk_format $backup_qcow2_file $backup_file
+    fi
 
-    while [ ! -e /dev/nbd0p1 ];do
-        blockdev --rereadpt /dev/nbd0
-        sleep 1
-    done
-    while [ ! -e /dev/nbd1p1 ];do
-        blockdev --rereadpt /dev/nbd1
-        sleep 1
-    done
-    mkfs.ext4 -L sfsroot /dev/nbd0p1
-    mkfs.ext4 -L work /dev/nbd1p1
+    if [ -n "$swap_size" ];then
+        create_qemu_disk $swap_qcow2_file $swap_size
+        $SUDO mkswap -f -L swap /dev/nbd0p1
+        $SUDO qemu-nbd -d /dev/nbd0
+        convert_file $disk_format $swap_qcow2_file $swap_file
+    fi
 
-    install_system /dev/nbd0p1
-
-    qemu-nbd -d /dev/nbd0
-    qemu-nbd -d /dev/nbd1
-
-    chmod 777 $root_file
-    chmod 777 $work_file
+    if [ -n "$union_size" ];then
+        create_qemu_disk $union_qcow2_file $union_size
+        $SUDO mkfs.ext4 -L union /dev/nbd0p1
+        $SUDO qemu-nbd -d /dev/nbd0
+        convert_file $disk_format $union_qcow2_file $union_file
+    fi
 
     echo ""
-    echo "kvm -m 2048 -hda $root_file -hdb $work_file"
-    echo "kvm -m 1024 -hda $root_file"
+    echo "kvm -m 1024 -hda $sfsroot_file"
+    echo "kvm -m 2048 -hda $sfsroot_file -hdb $work_file"
+    
+    local params=" -m 2048"
+    test -e $sfsroot_file && params+=" -drive file=$sfsroot_file,if=virtio"
+    test -e $swap_file && params+=" -drive file=$swap_file,if=virtio"
+    test -e $union_file && params+=" -drive file=$union_file,if=virtio"
+    test -e $home_file && params+=" -drive file=$home_file,if=virtio"
+    test -e $work_file && params+=" -drive file=$work_file,if=virtio"
+    test -e $backup_file && params+=" -drive file=$backup_file,if=virtio"
+    echo "kvm $params" > $installdir/kvm.sh
+    chmod +x $installdir/kvm.sh
     echo ""
 }
 
@@ -1308,15 +1504,8 @@ make_system()
 
 install_system()
 {
-    dst=$1
+    local dst=$1
 
-    check_file_exist $root_sfs_file
-
-    if [ "${dst_dir:0:4}" = '/dev' ];then
-        if [ ! -b $dst ];then
-            err "$dst_dir is not block file."
-        fi
-    fi
     if [ -b $dst ];then
         mount_device $dst $root_dir
         dst_dir=$root_dir
@@ -1324,21 +1513,29 @@ install_system()
         gen_default_grub_config $dst
     else
         dst_dir=$dst
-        mkdir -p $dst_dir
     fi
 
-    temp_dir=$dst_dir/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
-    mkdir -p $temp_dir
+    local install_dir
+    install_dir=$dst_dir/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+    $SUDO mkdir -p $install_dir
 
-    $CP $zm_dir/${kernel_name} $temp_dir
-    $CP $zm_dir/${initrd_name} $temp_dir
-    # gen_initrd $dst_dir/linux/$zm_arch/
+    local root_sfs_file=$zm_dir/${root_sfs_name}
+    local home_sfs_file=$zm_dir/${home_sfs_name}
+    local kernel_file=$zm_dir/${kernel_name}
+    local initrd_file=$zm_dir/${initrd_name}
 
-    rsync -avP $root_sfs_file $temp_dir
-    rsync -avP $root_sfs_file.[0-9] $temp_dir || true
+    check_file_exist $root_sfs_file
+    check_file_exist $kernel_file
+    check_file_exist $initrd_file
+
+    $SUDO $CP $kernel_file $install_dir
+    $SUDO $CP $initrd_file $install_dir
+
+    $SUDO rsync -avP $root_sfs_file $install_dir
+    $SUDO rsync -avP $root_sfs_file.[0-9] $install_dir || true
     if [ -e $home_sfs_file ];then
-        rsync -avP $home_sfs_file $temp_dir
-        rsync -avP $home_sfs_file.[0-9] $temp_dir || true
+        $SUDO rsync -avP $home_sfs_file $install_dir
+        $SUDO rsync -avP $home_sfs_file.[0-9] $install_dir || true
     fi
 
     $zm_path --install-zm $root_dir
@@ -1406,7 +1603,7 @@ add_base_softs()
     add_soft "$kernel_softs"
     add_soft locales 
     add_soft bash bash-completion
-    add_soft grub2 udev procinfo 
+    add_soft grub2 syslinux udev procinfo 
     add_soft aptitude lsof
     add_soft acpi-support acpi
     add_soft hdparm usbutils lshw 
@@ -1418,6 +1615,7 @@ add_base_softs()
     add_soft vim gzip xz-utils 
     add_soft netcat network-manager 
     add_soft dh-make
+    add_soft qemu-guest-agent
     # pigz lzip plzip pxz p7zip-full
 
     add_soft parted lvm2 initramfs-tools lsb-release genisoimage
@@ -1991,10 +2189,6 @@ zm_config()
         os_name="debian"
         zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
     fi
-    root_sfs_file=$zm_dir/${root_sfs_name}
-    home_sfs_file=$zm_dir/${home_sfs_name}
-    kernel_file=$zm_dir/${kernel_name}
-    initrd_file=$zm_dir/${initrd_name}
 
     zm_user_home=$(grep $zm_user /etc/passwd | awk -F:  '{print $6}')
     if [ -z "$zm_user_dir" ];then
@@ -2087,6 +2281,8 @@ zm_excute()
                 ;;
             --backup-info) shift; zm_backup_info $@; exit 0;
                 ;;
+            --make-virtual-system) shift; make_virtual_system $@; exit 0;
+                ;;
             --version)
                 show_version; exit 0;
                 ;;
@@ -2107,11 +2303,8 @@ zm_excute()
 
 zm_init()
 {
-    if $zm_debug;then
-        CP='/bin/cp -rafv'
-    else
-        CP='/bin/cp -raf'
-    fi
+    CP="/bin/cp -raf"
+
     # aptitude -d -R -y install 
     # APTGET='apt-get --yes'
     # APTGET='apt-get --no-install-recommends --no-install-suggests --yes'
@@ -2134,7 +2327,6 @@ zm_init()
     which pigz > /dev/null 2>&1 && GZ="pigz -p $cpu_counts"
     which plzip > /dev/null 2>&1 && LZ="plzip -n $cpu_counts"
     which pxz > /dev/null 2>&1 && XZ="pxz -T$cpu_counts"
-
 
     root_sfs_name="root.sfs"
     home_sfs_name="home.sfs"
@@ -2184,24 +2376,31 @@ zm_init()
     fi
 }
 
+umount_all_device()
+{
+    if [ -e $build_dir/.mount_devs ];then
+        local devs="$(cat $build_dir/.mount_devs)"
+        for dev in $devs;do
+            if $zm_debug;then
+                echo "umount $dev..."
+            fi
+            umount_device $dev || true
+        done
+        rm -rf $build_dir/.mount_devs
+    fi
+}
+
 zm_uninit()
 {
     if $zm_debug;then
         set +x
-        print_env
     fi
     trap - ERR INT TERM EXIT
     if [ -d "$build_dir" ];then
         if $zm_debug;then
             echo "$zm_path $zm_argv Clean ..."
         fi
-        if [ -e $build_dir/.mount_devs ];then
-            devs=`cat $build_dir/.mount_devs`
-            for dev in $devs;do
-                umount_device $dev || true
-            done
-            rm -rf $build_dir/.mount_devs
-        fi
+        umount_all_device
         if $zm_debug;then
             echo "In debug mode, please manual delete $build_dir"
         else
