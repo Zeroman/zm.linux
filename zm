@@ -15,7 +15,7 @@ set -E
 # cd $zm_workdir
 
 sfs_mpath=/media/sfs
-unionfs_mpath=/media/unionfs
+union_mpath=/media/union
 sfs_part_mpath=/media/sfsroot
 sfs_root_mpath=$sfs_mpath/root
 sfs_home_mpath=$sfs_mpath/home
@@ -169,8 +169,8 @@ _add_samba_user()
 
 usage ()
 {
-    declare -a options
-    declare -a msgs
+    local -a options
+    local -a msgs
     index=0
 
     add_help()
@@ -214,16 +214,25 @@ usage ()
     add_help "--print-os-id" "print os id"
     add_help "--version" "print version"
 
+    local maxlen=0
+    for pos in $(seq 0 $(expr $index - 1))
+    do
+        if [ $maxlen -lt ${#options[pos]} ];then
+            maxlen=${#options[pos]}
+        fi
+    done
+    maxlen=$(expr $maxlen + 4)
+
     echo "Usage:  <options>"
     for pos in $(seq 0 $(expr $index - 1))
     do
         option="${options[pos]}"
         msg="${msgs[pos]}"
-        if [ ${#option} -gt 30 ];then
-            printf "  %-30s  \n" "$option"
-            printf "  %-30s : %-s\n" "" "$msg"
+        if [ ${#option} -gt ${maxlen} ];then
+            printf "  %-${maxlen}s  \n" "$option"
+            printf "  %-${maxlen}s : %-s\n" "" "$msg"
         else
-            printf "  %-30s : %-s\n" "$option" "$msg"
+            printf "  %-${maxlen}s : %-s\n" "$option" "$msg"
         fi
     done
 
@@ -2368,11 +2377,11 @@ zm_init()
     #echo $code_kernel_3_18 $code_kernel_now
 
     if modprobe overlay > /dev/null 2>&1;then
-        unionfs_root_mpath=$unionfs_mpath/root/upper
-        unionfs_home_mpath=$unionfs_mpath/home/upper
+        unionfs_root_mpath=$union_mpath/root/upper
+        unionfs_home_mpath=$union_mpath/home/upper
     elif modprobe aufs > /dev/null 2>&1;then
-        unionfs_root_mpath=$unionfs_mpath/root
-        unionfs_home_mpath=$unionfs_mpath/home
+        unionfs_root_mpath=$union_mpath/root
+        unionfs_home_mpath=$union_mpath/home
     fi
 }
 
