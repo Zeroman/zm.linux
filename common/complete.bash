@@ -26,7 +26,7 @@ _zm()
 
 
     case $prev in
-        --mount-backup|--remove-backup|--backup-info)
+        --mount-backup|--remove-backup|--backup-info|--syncdir-backup)
             local opts=$(basename -s .sfs -a $(cd $zm_backup_mountdir;/bin/ls *.sfs 2> /dev/null))
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0

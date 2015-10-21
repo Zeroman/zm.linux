@@ -25,6 +25,7 @@ unionfs_clean_file=.unionfs.fs.clean
 KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
 
 work_mountdir=/work
+cache_dir=$work_mountdir/cache
 backup_mountdir=/media/backup
 backup_workdir=/media/bak
 
@@ -203,6 +204,7 @@ usage ()
     add_help "--mount-backup name" "mount backup"
     add_help "--remove-backup name" "remove backup"
     add_help "--umount-backup name" "umount backup"
+    add_help "--syncdir-backup name dir" "sync backup to directory"
     add_help "--backup-info name" "print backup sfs info"
     add_help "-i,--install-soft name" "install soft"
     add_help "--install-softs" "install all softs in config.sh"
@@ -931,7 +933,7 @@ zm_chroot()
         chroot_dir=$(readlink -f "$param1")
     fi
 
-    local chroot_cmd="$SUDO systemd-nspawn -M $zm_user -bD $chroot_dir --bind /work/cache --bind $zm_dir"
+    local chroot_cmd="$SUDO systemd-nspawn -M $zm_user -bD $chroot_dir --bind $cache_dir --bind $zm_dir"
     if which systemd-nspawn > /dev/null;then
         local cmd="$*"
         local requires="basic.target"
@@ -968,9 +970,9 @@ SendSIGHUP=yes
     mount_device -t tmpfs -o mode=1777,nosuid,nodev shm $chroot_dir/dev/shm
     mount_device -t tmpfs -o nosuid,nodev,mode=0755 run $chroot_dir/run
     mkdir -p $chroot_dir/run/lock
-    if [ -d /work/cache ];then
-        mkdir -p $chroot_dir/work/cache
-        mount_device --bind /work/cache/ $chroot_dir/work/cache
+    if [ -d "$cache_dir" ];then
+        mkdir -p $chroot_dir/$cache_dir
+        mount_device --bind $cache_dir $chroot_dir/$cache_dir
     fi
 
     mkdir -p $root_dir/$zm_dir
@@ -986,8 +988,8 @@ SendSIGHUP=yes
 
     umount_device $chroot_dir/$zm_dir
 
-    if [ -d /work/cache ];then
-        umount_device $chroot_dir/work/cache
+    if [ -d "$cache_dir" ];then
+        umount_device $chroot_dir/$cache_dir
     fi
     umount_device $chroot_dir/run
     umount_device $chroot_dir/dev/shm
@@ -1484,12 +1486,12 @@ make_system()
     print_env
 
     if [ ! -e "$root_dir/bin/sh" ];then
-        if [ -d /work/cache/apt-archives ];then
+        if [ -d $cache_dir/apt-archives ];then
             mkdir -p $root_dir/var/cache/apt/archives
-            mount_device --bind /work/cache/apt-archives $root_dir/var/cache/apt/archives
+            mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
         fi
         debootstrap --arch $zm_arch ${deb_ver} $root_dir $apt_url/debian
-        if [ -d /work/cache/apt-archives ];then
+        if [ -d $cache_dir/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
         fi
     fi
@@ -1715,9 +1717,30 @@ zm_add_groups()
     for g in $groups
     do
         if ( grep $g /etc/group > /dev/null; ) && ! ( groups $zm_user | grep $g > /dev/null; );then
-            usermod -a -G $g $zm_user
+            $SUDO usermod -a -G $g $zm_user
         fi
     done
+}
+
+zm_setup_user()
+{
+    if ! grep 8888 /etc/group > /dev/null;then
+        $SUDO groupadd -g 8888 $zm_user 
+        $SUDO useradd -m -s /bin/bash -u 8888 -g 8888 $zm_user
+        # useradd -m -s /bin/zsh -u 8888 -g 8888 $zm_user
+        echo $zm_user:"$zm_user_passwd" | $SUDO chpasswd
+        echo root:"$zm_root_passwd" | $SUDO chpasswd
+        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers
+        # echo "
+        # $zm_user    ALL=NOPASSWD: /bin/mount
+        # $zm_user    ALL=NOPASSWD: /bin/umount
+        # " > /etc/sudoers.d/$zm_user.mount
+    fi
+    if [ -d "$work_mountdir" ];then
+        $SUDO chown $zm_user:$zm_user $work_mountdir #-R    
+        $SUDO chown $zm_user:$zm_user $HOME #-R
+        # chown $zm_user:$zm_user $(cat /etc/passwd | grep $zm_user | awk -F: '{print $6}') #-R
+    fi
 }
 
 install_zm()
@@ -1836,7 +1859,6 @@ zm_mount_backup()
         return
     fi
 
-
     bak_name="$1"
     bak_root_dir=$backup_workdir/$bak_name
     bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
@@ -1938,26 +1960,13 @@ zm_backup_dir()
     fi
 
     local bak_sfs=$backup_mountdir/${bak_name}.sfs
-    local new_bak_sfs=${bak_sfs}.new
 
-    if [ -e "$new_bak_sfs" ];then
-        whiptail --yesno "$bak_sfs is exist, continue?" 30 80
-        if [ $? != 0 ];then
-            return 0
-        fi
-        $SUDO chattr -i $new_bak_sfs
-        $SUDO rm $new_bak_sfs
-    fi
-
-    gen_common_sfs $bak_path $new_bak_sfs
-
+    test -e "$bak_sfs" && dialog_continue "$bak_sfs is exist, continue?"
     local all_sfs=$(get_all_sfs $bak_sfs)
     if [ -n "$all_sfs" ];then
         $SUDO chattr -i $all_sfs
-        backup_file $all_sfs
     fi
-
-    $SUDO mv $new_bak_sfs $bak_sfs
+    gen_common_sfs $bak_path $bak_sfs
     $SUDO chattr +i $bak_sfs
 }
 
@@ -1996,6 +2005,33 @@ zm_remove_backup()
             $SUDO rm -rf "$backup_unionfs_dir"
         fi
     done
+}
+
+zm_syncdir_backup()
+{
+    local bakname="$1"
+    local syncdir="$2"
+
+    if [ -z "$bakname" ];then
+        err "param error, bakname is blank."
+    fi
+
+    if [ -z "$syncdir" ];then
+        syncdir="$work_mountdir/$bakname"
+    fi
+
+    if [ -e "$syncdir" ];then
+        err "<$FUNCNAME> $syncdir is exist."
+    fi
+
+    mkdir -p $syncdir
+    local mountdir="$(zm_mount_backup $bakname)"
+    if [ -n "$mountdir" ];then
+        $SUDO rsync -avP $mountdir/ $syncdir
+    else
+        rmdir $syncdir
+        err "sync backup to $syncdir error."
+    fi
 }
 
 zm_remove_backup_branch()
@@ -2116,6 +2152,10 @@ zm_config()
                 ;;
             --zm-user) zm_argv_del $1;shift; zm_user=$1; zm_argv_del $1;shift;
                 ;;
+            --zm-user-passwd) zm_argv_del $1;shift; zm_user_passwd=$1; zm_argv_del $1;shift;
+                ;;
+            --zm-root-passwd) zm_argv_del $1;shift; zm_root_passwd=$1; zm_argv_del $1;shift;
+                ;;
             --zm-userdir) zm_argv_del $1;shift; zm_user_dir=$1; zm_argv_del $1;shift;
                 ;;
             --zm-dir) zm_argv_del $1;shift; zm_dir=$1; zm_argv_del $1;shift;
@@ -2184,11 +2224,13 @@ zm_config()
 
     if [ -z "$zm_user" ];then
         if [ -z "$SUDO_USER" ];then
-            zm_user=$USER
+            zm_user="$USER"
         else
             zm_user=$SUDO_USER
         fi
     fi
+    test -z "$zm_user_passwd" && zm_user_passwd="$zm_user"
+    test -z "$zm_root_passwd" && zm_root_passwd="$zm_user"
 
     if [ -z "$zm_dir" ];then
         zm_dir=$sfs_part_mpath/linux/$zm_arch
@@ -2288,6 +2330,8 @@ zm_excute()
                 ;;
             --remove-backup) shift; zm_remove_backup $@; exit 0;
                 ;;
+            --syncdir-backup) shift; zm_syncdir_backup $@; exit 0;
+                ;;
             --backup-info) shift; zm_backup_info $@; exit 0;
                 ;;
             --make-virtual-system) shift; make_virtual_system $@; exit 0;
@@ -2323,8 +2367,8 @@ zm_init()
     -o Dpkg::Options::=--force-confdef 
     -o Dpkg::Options::=--force-confnew
     "
-    if [ -d /work/cache/apt-archives ];then
-        APTGET+=" -o Dir::Cache::Archives=/work/cache/apt-archives"
+    if [ -d $cache_dir/apt-archives ];then
+        APTGET+=" -o Dir::Cache::Archives=$cache_dir/apt-archives"
     fi
 
     cpu_counts=`cat /proc/cpuinfo | grep "processor" | wc -l`
