@@ -181,6 +181,7 @@ usage ()
         index=$(expr $index + 1)
     }
 
+    add_help "--create-part" "create part with lvm"
     add_help "--install-grub device" "install grub on device, device like /dev/sda1"
     add_help "--install-system device" "install system on device, device like /dev/sda1"
     add_help "--arch arch" "system arch, value: i386|amd64"
@@ -566,6 +567,7 @@ init_lvm_partition()
     for part in ${parts[*]}
     do
         test -b $part || err "no partition $part"
+        parted set $part lvm on
     done
 
     dialog_continue "create lvm part on ${parts[*]}."
@@ -2333,6 +2335,8 @@ zm_excute()
             --syncdir-backup) shift; zm_syncdir_backup $@; exit 0;
                 ;;
             --backup-info) shift; zm_backup_info $@; exit 0;
+                ;;
+            --create-part) shift; init_lvm_partition $@; exit 0;
                 ;;
             --make-virtual-system) shift; make_virtual_system $@; exit 0;
                 ;;
