@@ -362,9 +362,16 @@ print_disk_sizeinfo()
     fi
 }
 
-check_mount()
+is_mounted()
 {
-    cat /proc/mounts | grep "$1" > /dev/null
+    test -z "$1" && err "$FUNCNAME param error."
+    # if which findmnt > /dev/null;then
+        # findmnt -no source "$1" > /dev/null
+    # fi
+    if cat /proc/mounts | grep " $1 " > /dev/null 2>&1;then
+        return 0
+    fi
+    return 1
 }
 
 mount_device()
@@ -490,12 +497,12 @@ zm_copy_source()
 
 install_grub()
 {
-    grubdev=$1
-    echo "[ $FUNCNAME ] grub -> $grubdev  "
+    local grubdev=$1
 
-    grubdev=$(readlink -f $grubdev)
+    grubdev=$(readlink -f "$grubdev")
+
     check_file_exist $grubdev
-
+    log_info "install grub on $grubdev"
     dialog_continue "Install grub on $grubdev"
 
     #恢复主扇区
@@ -505,15 +512,9 @@ install_grub()
 
     mount_device $grubdev $mnt_dir
     install_grub_on_dir $mnt_dir
-    if [ -e $mnt_dir/boot/grub/config/default.cfg ];then
-        echo "Overwrite $mnt_dir/boot/grub/config/default.cfg ?"
-        dialog_continue now
-    fi
     $SUDO grub-mkdevicemap -m $mnt_dir/boot/grub/device.map
-    # mount_device --bind /dev $mnt_dir/dev
-    # chroot $mnt_dir grub-mkconfig -o /boot/grub/grub.cfg
-    # umount_device $mnt_dir/dev
-    disk_device=${grubdev/p[0-9]*}
+
+    local disk_device=${grubdev/p[0-9]*}
     if [ "$disk_device" == "$grubdev" ];then
         disk_device=${grubdev/[0-9]*}
     fi
@@ -617,7 +618,7 @@ format_usb_device()
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
-    if check_mount $usb_device;then 
+    if is_mounted $usb_device;then 
         err "$usb_device is mounted!"
     fi
 
@@ -655,7 +656,7 @@ EOF
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
-    if check_mount $usb_device;then 
+    if is_mounted $usb_device;then 
         err "$usb_device is mounted!"
     fi
 
@@ -676,7 +677,7 @@ EOF
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
-    if check_mount $usb_device;then 
+    if is_mounted $usb_device;then 
         err "$usb_device is mounted!"
     fi
 }

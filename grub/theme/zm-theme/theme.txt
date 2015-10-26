@@ -1,0 +1,62 @@
+
+# Main
+title-text: "GNU/Linux"
+title-font: "DejaVu Serif Bold 24"
+title-color: "#DCDDDD"
+message-font: "Terminus Bold 12"
+message-color: "#00FF00"
+message-color: "#F6F6F6"
+# desktop-image: "background.png"
+desktop-color: "#000000"
+terminal-font: "Terminus Regular 12"
+
+# Menu
++ boot_menu {
+	      left = 15%
+	      width = 70%
+	      top = 15%
+	      height = 70%
+	      item_font = "DejaVu Serif Bold 24"
+	      selected_item_font =  "DejaVu Serif Bold 24"
+	      item_color = "#B0B0B0"
+	      selected_item_color = "#DCDDDD"
+	      item_height = 48
+	      item_padding = 15
+	      item_spacing = 5
+	      icon_widht = 48
+	      icon_height = 48
+	      item_icon_space = 20
+	      selected_item_pixmap_style = "select_bkg_*.png"
+	      menu_pixmap_style = ""
+	      scrollbar = true
+	      scrollbar_width = 24
+	      scrollbar_thumb = ""
+	      scrollbar_frame = ""
+}
+
+# Progress Bar
++ progress_bar {
+		  id = "__timeout__"
+		  left = 10%
+		  width = 800
+		  top = 85%
+		  height = 10
+		  bg_color = "#B0B0B0"
+		  fg_color = "#DCDDDD"
+		  show_text = true
+		  font = "Terminus Bold 12"
+		  text_color = "#151515"
+		  text = "@TIMEOUT_NOTIFICATION_LONG@"
+}
+
+# Information
++ hbox {
+	  top = 100%-35
+	  left = 20%
+	  + label {text = "Enter: " font = "Terminus Bold 12" color = "#4C4C4C" align = "left"}
+	  + label {text = "Boot Selection     " font = "Terminus Regular 12" color = "#1692D0" align = "left"}
+	  + label {text = "E: " font = "Terminus Bold 12" color = "#4C4C4C" align = "left"}
+	  + label {text = "Edit Selection     " font = "Terminus Regular 12" color = "#1692D0" align = "left"}
+	  + label {text = "C: " font = "Terminus Bold 12" color = "#4C4C4C" align = "left"}
+	  + label {text = "GRUB Commandline     " font = "Terminus Regular 12" color = "#1692D0" align = "left"}
+}
