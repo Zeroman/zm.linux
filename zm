@@ -1230,26 +1230,32 @@ update_grub_config()
     savedefault
     }" > $grubroot/boot/grub/config/default.cfg
 
+    local items=""
+    check_dir_exist "$grubroot/linux"
     # sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $grubroot/boot/grub/config/linux.cfg
     local linuxcfg=$grubroot/boot/grub/config/linux.cfg
     > $linuxcfg
     echo 'submenu "zm linux  ->" --class=submenu --class debian {
     search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
     echo "" >> $linuxcfg
-    echo 'submenu "zm linux (old) ->" --class=submenu --class debian {
-    search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
-    for dir in $(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old)
-    do
-        echo "
-        menuentry '${dir}' --class=submenu --class debian {
-        set     zm_dir=/linux/${dir}
-        linux	\$zm_dir/vmlinuz
-        initrd	\$zm_dir/initrd.img
-        savedefault
-        } " >> $linuxcfg
-    done
-    echo "}" >> $linuxcfg
-    for dir in $(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep -v old)
+    items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
+    if [ -n "$items" ];then
+        echo 'submenu "zm linux (old) ->" --class=submenu --class debian {
+        search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
+        for dir in $items
+        do
+            echo "
+            menuentry '${dir}' --class=submenu --class debian {
+            set     zm_dir=/linux/${dir}
+            linux	\$zm_dir/vmlinuz
+            initrd	\$zm_dir/initrd.img
+            savedefault
+            } " >> $linuxcfg
+        done
+        echo "}" >> $linuxcfg
+    fi
+    items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep -v old || true)
+    for dir in $items
     do
         echo "
         menuentry '${dir}' --class=submenu --class debian {
@@ -1431,14 +1437,16 @@ make_virtual_system()
     if [ -n "$home_size" ];then
         create_qemu_disk $home_qcow2_file $home_size
         $SUDO mkfs.ext4 -L home /dev/nbd0p1
-        mount_device -t tmpfs -o mode=755 tmpfs $unionfs_dir
-        mount_unionfs home $zm_dir $sfs_mnt_dir $unionfs_dir $root_dir
-        mount_device /dev/nbd0p1 $mnt_dir
-        $SUDO rsync -a $root_dir/ $mnt_dir
-        umount_device $mnt_dir
-        umount_device $root_dir
-        umount_device $unionfs_dir
-        umount_all_sfs $sfs_mnt_dir home
+        if [ -e "$zm_dir/home.sfs" ];then
+            mount_device -t tmpfs -o mode=755 tmpfs $unionfs_dir
+            mount_unionfs home $zm_dir $sfs_mnt_dir $unionfs_dir $root_dir
+            mount_device /dev/nbd0p1 $mnt_dir
+            $SUDO rsync -a $root_dir/ $mnt_dir
+            umount_device $mnt_dir
+            umount_device $root_dir
+            umount_device $unionfs_dir
+            umount_all_sfs $sfs_mnt_dir home
+        fi
         $SUDO qemu-nbd -d /dev/nbd0
         convert_file $disk_format $home_qcow2_file $home_file
     fi
@@ -1561,8 +1569,6 @@ install_system()
     if [ -b $dst ];then
         mount_device $dst $root_dir
         dst_dir=$root_dir
-        install_grub $dst
-        update_grub_config $dst
     else
         dst_dir=$dst
     fi
@@ -1599,6 +1605,8 @@ install_system()
 
     if [ -b $dst ];then
         umount_device $dst_dir
+        install_grub $dst
+        update_grub_config $dst
     fi
 }
 
