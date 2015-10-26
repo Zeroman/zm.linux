@@ -183,6 +183,7 @@ usage ()
 
     add_help "--create-part" "create part with lvm"
     add_help "--install-grub device" "install grub on device, device like /dev/sda1"
+    add_help "--update-grub device" "update grub on device, device like /dev/sda1"
     add_help "--install-system device" "install system on device, device like /dev/sda1"
     add_help "--arch arch" "system arch, value: i386|amd64"
     add_help "--deb-ver" "debian version, value: stable|testing|unstable"
@@ -305,10 +306,16 @@ get_file_size()
 
 check_file_exist()
 {
-    test -z $1 && err "Please input check_file_exist() param"
+    local "file=$1"
+    test -z "$file" && err "Please input check_file_exist() param"
+    test -e "$file" || err "Cann't find file $file."
+}
 
-    file=$1
-    test -e $file || err "Cann't find file $file."
+check_dir_exist()
+{
+    local "dir=$1"
+    test -z "$dir" && err "Please input check_dir_exist() param"
+    test -e "$dir" || err "Cann't find dir $dir."
 }
 
 check_binary()
@@ -456,13 +463,6 @@ boot_log()
     fi
 }
 
-update_grub_config()
-{
-    sfsroot_dev=$(mount | grep -w /media/sfsroot | awk '{print $1}')
-    dialog_continue "update grub on $sfsroot_dev"
-    gen_default_grub_config $sfsroot_dev
-}
-
 defalut_install_dir()
 {
     install_dir=$1
@@ -490,20 +490,20 @@ zm_copy_source()
 
 install_grub()
 {
-    grub_device=$1
-    echo "[ $FUNCNAME ] grub -> $grub_device  "
+    grubdev=$1
+    echo "[ $FUNCNAME ] grub -> $grubdev  "
 
-    grub_device=$(readlink -f $grub_device)
-    check_file_exist $grub_device
+    grubdev=$(readlink -f $grubdev)
+    check_file_exist $grubdev
 
-    dialog_continue "Install grub on $grub_device"
+    dialog_continue "Install grub on $grubdev"
 
     #恢复主扇区
-    #  /sbin/install-mbr $(echo ${grub_device} | tr -d [0-9])
+    #  /sbin/install-mbr $(echo ${grubdev} | tr -d [0-9])
     #激活扇区
-    # sfdisk -A11 ${grub_device}
+    # sfdisk -A11 ${grubdev}
 
-    mount_device $grub_device $mnt_dir
+    mount_device $grubdev $mnt_dir
     install_grub_on_dir $mnt_dir
     if [ -e $mnt_dir/boot/grub/config/default.cfg ];then
         echo "Overwrite $mnt_dir/boot/grub/config/default.cfg ?"
@@ -513,9 +513,9 @@ install_grub()
     # mount_device --bind /dev $mnt_dir/dev
     # chroot $mnt_dir grub-mkconfig -o /boot/grub/grub.cfg
     # umount_device $mnt_dir/dev
-    disk_device=${grub_device/p[0-9]*}
-    if [ "$disk_device" == "$grub_device" ];then
-        disk_device=${grub_device/[0-9]*}
+    disk_device=${grubdev/p[0-9]*}
+    if [ "$disk_device" == "$grubdev" ];then
+        disk_device=${grubdev/[0-9]*}
     fi
     $SUDO grub-install $disk_device --no-floppy --root-directory=$mnt_dir --modules="biosdisk part_msdos"
     umount_device $mnt_dir
@@ -698,6 +698,7 @@ gen_iso_file()
     linux $temp_path/$kernel_name sfs_part=cdrom zm_user=$zm_user zm_arch=$zm_arch
     echo 'Loading initrd...'
     initrd $temp_path/$initrd_name
+    savedefault
 }
 " > $iso_dir/boot/grub/grub.cfg
 
@@ -1201,23 +1202,21 @@ sfs2dir()
     7z x $1 -o${2}
 }
 
-gen_default_grub_config()
+update_grub_config()
 {
-    grub_device=$1
+    local grubdev="$1"
 
-    label_suffix=""
-    disk_label=$(e2label $grub_device)
-    if echo $disk_label | grep sfsroot;then
-        label_suffix=${disk_label/sfsroot}
-    fi
-    if [ ! -z "$label_suffix" ];then
-        kernel_params+=" label_suffix=$label_suffix"
+    if [ -z "$grubdev" ];then
+        grubdev=$(mount | grep -w "$sfs_part_mpath" | awk '{print $1}')
     fi
 
-    boot_uuid=$(blkid -s UUID $grub_device | awk -F= '{print $2}' | tr -d '"')
-    temp_dir=$(mktemp -d)
-    mount_device $grub_device $temp_dir
-    temp_path=/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+    local grubroot="$(mktemp -d)"
+    local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
+    local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+
+    mount_device $grubdev $grubroot
+    check_dir_exist "$grubroot/$temp_path"
+    check_dir_exist "$grubroot/boot/grub/config"
     echo "
     menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
     set root_uuid=$boot_uuid
@@ -1227,10 +1226,42 @@ gen_default_grub_config()
     linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $kernel_params 
     echo 'Loading $zm_arch initrd...'
     initrd \$zm_dir/${initrd_name}
-}" > $temp_dir/boot/grub/config/default.cfg
-sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $temp_dir/boot/grub/config/linux.cfg
-umount_device $temp_dir
-rmdir $temp_dir
+    savedefault
+    }" > $grubroot/boot/grub/config/default.cfg
+
+    # sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $grubroot/boot/grub/config/linux.cfg
+    local linuxcfg=$grubroot/boot/grub/config/linux.cfg
+    > $linuxcfg
+    echo 'submenu "zm linux  ->" --class=submenu --class debian {
+    search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
+    echo "" >> $linuxcfg
+    echo 'submenu "zm linux (old) ->" --class=submenu --class debian {
+    search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
+    for dir in $(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old)
+    do
+        echo "
+        menuentry '${dir}' --class=submenu --class debian {
+        set     zm_dir=/linux/${dir}
+        linux	\$zm_dir/vmlinuz
+        initrd	\$zm_dir/initrd.img
+        savedefault
+        } " >> $linuxcfg
+    done
+    echo "}" >> $linuxcfg
+    for dir in $(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep -v old)
+    do
+        echo "
+        menuentry '${dir}' --class=submenu --class debian {
+        set     zm_dir=/linux/${dir}
+        linux	\$zm_dir/vmlinuz
+        initrd	\$zm_dir/initrd.img
+        savedefault
+    } " >> $linuxcfg
+    done
+    echo "}" >> $linuxcfg
+
+    umount_device $grubroot
+    rmdir $grubroot
 }
 
 gen_iso_system()
@@ -1246,13 +1277,13 @@ gen_usb_boot ()
     usb_device=$1
     check_file_exist $usb_device
 
-    grub_device=${usb_device}2
-    if [ ! -b ${grub_device} ];then
+    grubdev=${usb_device}2
+    if [ ! -b ${grubdev} ];then
         format_usb_device $usb_device
     fi
-    check_file_exist $grub_device
-    install_grub $grub_device
-    gen_default_grub_config $grub_device
+    check_file_exist $grubdev
+    install_grub $grubdev
+    update_grub_config $grubdev
 }
 
 gen_usb_system()
@@ -1498,10 +1529,17 @@ make_system()
         fi
     fi
 
-    $zm_path --zm-user $zm_user --zm-userdir $zm_user_dir --install-zm $root_dir/
-
     local cmd=""
     local zm_options=""
+
+    zm_options="--install-zm $root_dir/"
+    test -z "$zm_user" || zm_options+=" --zm-user $zm_user"
+    test -z "$zm_user_dir" || zm_options+=" --zm-userdir $zm_user_dir"
+    $zm_path $zm_options 
+
+    mkdir -p $zm_dir
+
+    zm_options=""
     zm_options+=" --zm-user $zm_user"
     zm_options+=" --zm-dir $zm_dir"
     zm_options+=" --deb-ver $deb_ver"
@@ -1523,7 +1561,7 @@ install_system()
         mount_device $dst $root_dir
         dst_dir=$root_dir
         install_grub $dst
-        gen_default_grub_config $dst
+        update_grub_config $dst
     else
         dst_dir=$dst
     fi
@@ -1726,12 +1764,13 @@ zm_add_groups()
 
 zm_setup_user()
 {
-    if ! grep 8888 /etc/group > /dev/null;then
-        $SUDO groupadd -g 8888 $zm_user 
-        $SUDO useradd -m -s /bin/bash -u 8888 -g 8888 $zm_user
-        # useradd -m -s /bin/zsh -u 8888 -g 8888 $zm_user
+    local userid=8888
+
+    if ! grep $userid /etc/group > /dev/null;then
+        $SUDO groupadd -g $userid $zm_user 
+        $SUDO useradd -m -s /bin/bash -u $userid -g $userid $zm_user
+        # useradd -m -s /bin/zsh -u $userid -g $userid $zm_user
         echo $zm_user:"$zm_user_passwd" | $SUDO chpasswd
-        echo root:"$zm_root_passwd" | $SUDO chpasswd
         zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers
         # echo "
         # $zm_user    ALL=NOPASSWD: /bin/mount
@@ -1739,10 +1778,11 @@ zm_setup_user()
         # " > /etc/sudoers.d/$zm_user.mount
     fi
     if [ -d "$work_mountdir" ];then
-        $SUDO chown $zm_user:$zm_user $work_mountdir #-R    
+        $SUDO chown $zm_user:$zm_user $work_mountdir #-R   
         $SUDO chown $zm_user:$zm_user $HOME #-R
         # chown $zm_user:$zm_user $(cat /etc/passwd | grep $zm_user | awk -F: '{print $6}') #-R
     fi
+    echo root:"$zm_root_passwd" | $SUDO chpasswd
 }
 
 install_zm()
@@ -1755,7 +1795,7 @@ install_zm()
     zm_copy_source $_root_dir/usr/share/zm
 
     local _user_dir=$(readlink -m $_root_dir/usr/share/zm/user/$zm_user)
-    if [ "$zm_user_dir" != "$_user_dir" ];then
+    if [ "$zm_user_dir" != "$_user_dir" -a -d "$zm_user_dir" ];then
         rm_safe $_user_dir
         $SUDO mkdir -p $_user_dir
         $SUDO $CP $zm_user_dir/. $_user_dir/
@@ -2235,10 +2275,6 @@ zm_config()
     test -z "$zm_root_passwd" && zm_root_passwd="$zm_user"
 
     if [ -z "$zm_dir" ];then
-        zm_dir=$sfs_part_mpath/linux/$zm_arch
-        if [ -d "$zm_dir/$zm_user" ];then
-            zm_dir="$sfs_part_mpath/linux/$zm_arch/$zm_user"
-        fi
         os_name="debian"
         zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
     fi
@@ -2253,15 +2289,8 @@ zm_config()
             fi
         fi
     fi
-    check_file_exist "$zm_user_dir"
-    zm_user_dir=$(readlink -f $zm_user_dir)
-
-    if [ -e $zm_user_dir/config.sh ];then
-        source $zm_user_dir/config.sh
-    fi
-
-    zm_user_command zm_user_init
-
+    # check_file_exist "$zm_user_dir"
+    test -z "$zm_user_dir" || zm_user_dir=$(readlink -f "$zm_user_dir")
 
     if [ -z "$kernel_params" ];then
         if $zm_debug;then
@@ -2270,6 +2299,11 @@ zm_config()
             kernel_params="quiet"
         fi
     fi
+
+    if [ -e "$zm_user_dir/config.sh" ];then
+        source $zm_user_dir/config.sh
+    fi
+    zm_user_command zm_user_init
 }
 
 zm_excute()
@@ -2278,9 +2312,13 @@ zm_excute()
         case $1 in
             --install-grub) shift; install_grub $1; test -z "$1" || shift; 
                 ;;
+            --update-grub-config) shift; update_grub_config $1; exit 0; 
+                ;;
             --install-system) shift; install_system $1; test -z "$1" || shift; 
                 ;;
             --make-system) shift; make_system; exit 0;
+                ;;
+            --make-mini-system) shift; $zm_path --zm-user mini --make-system; exit 0;
                 ;;
             --gen-kernel) shift; gen_kernel $1; test -z "$1" || shift; 
                 ;;

@@ -4,6 +4,15 @@ zm_os_id=$(zm --print-os-id)
 zm_backup_workdir=$(zm --print-backup-workdir)
 zm_backup_mountdir=$(zm --print-backup-mountdir)
 
+_complet_disk_part()
+{
+    local DEV TYPE DEVICES=''
+    while read DEV TYPE; do
+        [ "$TYPE" = 'disk' -o "$TYPE" = 'part' ] && DEVICES+="$DEV "
+    done < <(lsblk -pnro name,type)
+    COMPREPLY=( $(compgen -W "$DEVICES" -- $cur) )
+}
+
 _zm()
 {
     local cur prev words cword
@@ -26,6 +35,10 @@ _zm()
 
 
     case $prev in
+        --install-grub|--update-grub-config)
+            _complet_disk_part 
+            return 0
+            ;;
         --mount-backup|--remove-backup|--backup-info|--syncdir-backup)
             local opts=$(basename -s .sfs -a $(cd $zm_backup_mountdir;/bin/ls *.sfs 2> /dev/null))
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
