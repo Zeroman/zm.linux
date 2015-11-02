@@ -183,7 +183,7 @@ usage ()
 
     add_help "--create-part" "create part with lvm"
     add_help "--install-grub device" "install grub on device, device like /dev/sda1"
-    add_help "--update-grub device" "update grub on device, device like /dev/sda1"
+    add_help "--update-grub-config device" "update grub on device, device like /dev/sda1"
     add_help "--install-system device" "install system on device, device like /dev/sda1"
     add_help "--arch arch" "system arch, value: i386|amd64"
     add_help "--deb-ver" "debian version, value: stable|testing|unstable"
@@ -2164,6 +2164,9 @@ zm_umount_backup()
         local bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
         for dir in upper aufs work/work work " ";do
             if [ -d $bak_unionfs_dir/$dir ];then
+                if [ -e "$bak_unionfs_dir/$dir/$unionfs_clean_file" ];then
+                    $SUDO rm -rf $bak_unionfs_dir/$dir/{*,.[!.]*,..?*}
+                fi
                 $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/$dir
             fi
         done
