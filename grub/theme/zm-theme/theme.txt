@@ -6,8 +6,8 @@ title-color: "#DCDDDD"
 message-font: "Terminus Bold 12"
 message-color: "#00FF00"
 message-color: "#F6F6F6"
-# desktop-image: "background.png"
-desktop-color: "#000000"
+desktop-image: "background.png"
+#desktop-color: "#000000"
 terminal-font: "Terminus Regular 12"
 
 # Menu
