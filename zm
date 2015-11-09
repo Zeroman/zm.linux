@@ -22,8 +22,6 @@ sfs_home_mpath=$sfs_mpath/home
 unionfs_max_branch=8
 unionfs_clean_file=.unionfs.fs.clean
 
-KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
-
 work_mountdir=/work
 cache_dir=$work_mountdir/cache
 backup_mountdir=/media/backup
@@ -44,6 +42,23 @@ show_version ()
 {   
     echo "$zm_version"
     exit 0
+}
+
+show_os_name() 
+{
+    local rootdir="$1"
+    local osname=""
+    if [ -e $rootdir/etc/apt/sources.list ];then
+        local deb_ver=stable
+        deb_ver=$(cat $rootdir/etc/apt/sources.list | grep deb | awk '{print $3}' | head -1)
+        if [ "$deb_ver" != "stable" -a "$deb_ver" != "unstable" -a "$deb_ver" != "testing" ];then
+            deb_ver="stable"
+        fi
+        osname="debian.$deb_ver"
+    elif [ -e $rootdir/etc/arch-release ];then
+        osname="archlinux"
+    fi
+    echo $osname
 }
 
 log_info()
@@ -186,7 +201,7 @@ usage ()
     add_help "--update-grub-config device" "update grub on device, device like /dev/sda1"
     add_help "--install-system device" "install system on device, device like /dev/sda1"
     add_help "--arch arch" "system arch, value: i386|amd64"
-    add_help "--deb-ver" "debian version, value: stable|testing|unstable"
+    add_help "--os-name" "os name, value: debian.stable|debian.testing|debian.unstable|archlinux"
     add_help "--gen-initrd [output_dir]" "generate initrd.img"
     add_help "--gen-iso-system iso_file_path" "install system to iso file"
     add_help "--build-dir dir" "build temp dir"
@@ -209,13 +224,13 @@ usage ()
     add_help "--syncdir-backup name dir" "sync backup to directory"
     add_help "--backup-info name" "print backup sfs info"
     add_help "-i,--install-soft name" "install soft"
-    add_help "--install-softs" "install all softs in config.sh"
+    add_help "--install-softs" "install all softs in ${os_name}_config.sh"
     add_help "--make-virtual-system" "install system to virtual image file"
 
     add_help "--print-workdir" "print workdir"
     add_help "--print-backup-workdir" "print backup workdir"
     add_help "--print-backup-mountdir" "print backup mountdir"
-    add_help "--print-os-id" "print os id"
+    add_help "--print-os-name" "print os name"
     add_help "--version" "print version"
 
     local maxlen=0
@@ -262,7 +277,7 @@ print_env()
 {
     clear
     print_line
-    debug_var deb_ver
+    debug_var os_name
     debug_var kernel_name
     debug_var kernel_ver
     debug_var kernel_params 
@@ -271,7 +286,7 @@ print_env()
     debug_var zm_user
     debug_var zm_user_dir
     debug_var install_dir
-    debug_var apt_url
+    debug_var src_url
     debug_var build_dir
     for var in $@
     do
@@ -490,8 +505,9 @@ zm_copy_source()
 {
     local _dst_dir=$1
 
-    $SUDO mkdir -p $_dst_dir/
-    $SUDO $CP $zm_workdir/{zm,common,initramfs,user,grub,Makefile,test} $_dst_dir/
+    $SUDO install -D $zm_workdir/zm $_dst_dir/zm
+    $SUDO $CP $zm_workdir/{common,user,grub,Makefile,test} $_dst_dir/
+
     # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
 
@@ -690,9 +706,10 @@ gen_iso_file()
     iso_filename=$1
 
     install_grub_on_dir $iso_dir
-    temp_path=/linux/$zm_arch/${zm_user}
+    local temp_path=/linux/$zm_arch/${zm_user}
+    local os_class=${os_name/.*}
     echo "
-    menuentry \"ZM($zm_arch) (default)\" --class debian {
+    menuentry \"ZM($zm_arch) (default)\" --class ${os_class} {
     set gfxpayload=keep
     search --no-floppy -l --set=root $iso_label
     echo 'Loading kernel...'
@@ -937,7 +954,16 @@ zm_chroot()
         chroot_dir=$(readlink -f "$param1")
     fi
 
-    local chroot_cmd="$SUDO systemd-nspawn -M $zm_user -bD $chroot_dir --bind $cache_dir --bind $zm_dir"
+    os_name=$(show_os_name $chroot_dir)
+    zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}
+
+    local chroot_cmd="$SUDO systemd-nspawn -M $zm_user -bD $chroot_dir"
+    if [ -d "$cache_dir" ];then
+        chroot_cmd+=" --bind $cache_dir"
+    fi
+    if [ -d "$zm_dir" ];then
+        chroot_cmd+=" --bind $zm_dir"
+    fi
     if which systemd-nspawn > /dev/null;then
         local cmd="$*"
         local requires="basic.target"
@@ -952,7 +978,7 @@ After=$requires
 Requires=$requires
 
 [Service]
-ExecStart=-/bin/sh -c \"$cmd;poweroff\"
+ExecStart=-/bin/sh -c \"$cmd;systemctl poweroff\"
 StandardInput=tty-force
 StandardOutput=inherit
 StandardError=inherit
@@ -1005,11 +1031,21 @@ SendSIGHUP=yes
 
 get_kernel_file()
 {
-    if [ -z "$kernel_ver" ];then
-        vmlinuz=$(readlink -f /vmlinuz)
-    else
-        vmlinuz=${kernel_name}-${kernel_ver}
-    fi
+    case "$os_name" in
+        debian.*)
+            if [ -z "$kernel_ver" ];then
+                vmlinuz=$(readlink -f /vmlinuz)
+            else
+                vmlinuz=${kernel_name}-${kernel_ver}
+            fi
+            ;;
+        archlinux)
+            vmlinuz=$(readlink -f /boot/vmlinuz-linux)
+            ;;
+        *)
+            vmlinuz=""
+            ;;
+    esac
     echo "$vmlinuz"
 }
 
@@ -1018,7 +1054,7 @@ get_kernel_ver()
     ver=$kernel_ver
     if [ -z "$kernel_ver" ];then
         vmlinuz=$(get_kernel_file)
-        ver=${vmlinuz#/boot/vmlinuz-}
+        ver=$(file $vmlinuz | grep 'Linux kernel.*boot executable' | sed 's/.*version \([^ ]\+\).*/\1/')
     fi
     echo $ver
 }
@@ -1031,13 +1067,37 @@ gen_kernel()
     $SUDO $CP $vmlinuz $install_dir/${kernel_name}
 }
 
-gen_initrd()
+gen_debian_initrd()
 {
     defalut_install_dir $1
     kernel_ver=$(get_kernel_ver)
     backup_file $install_dir/${initrd_name}
+    # $SUDO mkinitramfs -d $zm_workdir/initramfs -o $install_dir/${initrd_name} $kernel_ver
+    $SUDO mkinitramfs -o $install_dir/${initrd_name} $kernel_ver
+}
+
+gen_archlinux_initrd()
+{
+    defalut_install_dir $1
+    kernel_ver=$(get_kernel_ver)
+    backup_file $install_dir/${initrd_name}
+    mkinitcpio -A sfsroot -S autodetect -k "$kernel_ver" -g ${install_dir}/${initrd_name} 
+}
+
+gen_initrd()
+{
     echo "Genarate $install_dir/${initrd_name}..."
-    $SUDO mkinitramfs -d $zm_workdir/initramfs -o $install_dir/${initrd_name} $kernel_ver
+    case "$os_name" in
+        debian.*)
+            gen_debian_initrd $@
+            ;;
+        archlinux)
+            gen_archlinux_initrd $@
+            ;;
+        *)
+            return
+            ;;
+    esac
 }
 
 gen_common_sfs()
@@ -1117,7 +1177,7 @@ update_system()
     dialog_continue "[$sels] will update, continue?" "Update system"
 
     for sel in $sels;do
-        case $sel in
+        case "$sel" in
             kernel)
                 gen_kernel $zm_dir
                 ;;
@@ -1158,7 +1218,7 @@ branch_system()
     print_env
 
     for sel in $sels;do
-        case $sel in
+        case "$sel" in
             root)
                 sfsfile=$zm_dir/${root_sfs_name}
                 branch=$(get_sfs_new_branch_num $sfsfile)
@@ -1213,13 +1273,14 @@ update_grub_config()
 
     local grubroot="$(mktemp -d)"
     local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
-    local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+    local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}
+    local os_class=${os_name/.*}
 
     mount_device $grubdev $grubroot
     check_dir_exist "$grubroot/$temp_path"
     check_dir_exist "$grubroot/boot/grub/config"
     echo "
-    menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class debian {
+    menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class ${os_class} {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
     set zm_dir=$temp_path
@@ -1235,17 +1296,17 @@ update_grub_config()
     # sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $grubroot/boot/grub/config/linux.cfg
     local linuxcfg=$grubroot/boot/grub/config/linux.cfg
     > $linuxcfg
-    echo 'submenu "zm linux  ->" --class=submenu --class debian {
+    echo 'submenu "zm linux  ->" --class=submenu --class ${os_class} {
     search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
     echo "" >> $linuxcfg
     items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
     if [ -n "$items" ];then
-        echo 'submenu "zm linux (old) ->" --class=submenu --class debian {
+        echo 'submenu "zm linux (old) ->" --class=submenu --class ${os_class} {
         search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
         for dir in $items
         do
             echo "
-            menuentry '${dir}' --class=submenu --class debian {
+            menuentry '${dir}' --class=submenu --class ${os_class} {
             set     zm_dir=/linux/${dir}
             linux	\$zm_dir/vmlinuz
             initrd	\$zm_dir/initrd.img
@@ -1258,7 +1319,7 @@ update_grub_config()
     for dir in $items
     do
         echo "
-        menuentry '${dir}' --class=submenu --class debian {
+        menuentry '${dir}' --class=submenu --class ${os_class} {
         set     zm_dir=/linux/${dir}
         linux	\$zm_dir/vmlinuz
         initrd	\$zm_dir/initrd.img
@@ -1505,13 +1566,8 @@ auto_install()
 {
     test -d /run/lock/ || mkdir -p /run/lock
 
-    # export DEBIAN_FRONTEND=gnome
-    export DEBIAN_FRONTEND=noninteractive
-
     install_softs
-
     zm_user_command zm_setup
-
     gen_root_sfs / $zm_dir/${root_sfs_name}
     # gen_home_sfs /home $zm_dir/${home_sfs_name}
     gen_kernel $zm_dir
@@ -1520,26 +1576,64 @@ auto_install()
     sync;sync;sync
 }
 
-make_system()
+make_debian_base_system()
 {
-    need_root
     check_binary debootstrap
-
-    print_env
 
     if [ ! -e "$root_dir/bin/sh" ];then
         if [ -d $cache_dir/apt-archives ];then
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
         fi
-        local base_softs=aptitude,bash
-        debootstrap --include=$base_softs --arch=$zm_arch ${deb_ver} $root_dir $apt_url/debian
+        local base_softs=aptitude,bash,systemd-container
+        debootstrap --include=$base_softs --arch=$zm_arch ${os_name#*.} $root_dir $src_url/debian
         if [ -d $cache_dir/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
         fi
     fi
+}
+
+make_archlinux_base_system()
+{
+    md5sum_file=$dl_dir/md5sums.txt
+    download_file $src_url/archlinux/iso/latest/md5sums.txt $md5sum_file
+    bootstrap_file=$(cat $md5sum_file | grep $zm_arch | awk '{print $2}')
+    bootstrap_md5=$(cat $md5sum_file | grep $zm_arch | awk '{print $1}')
+    download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_md5
+    root_dir=$build_dir/root.$zm_arch
+    if [ ! -d "$root_dir" ];then
+        tar xvf /work/cache/pacman/pkg/$bootstrap_file -C $build_dir/
+    fi
+
+    echo "Server = $src_url/archlinux/\$repo/os/\$arch" > $root_dir/etc/pacman.d/mirrorlist
+    sed -i "s/^#MAKEFLAGS=\"-j2\"/MAKEFLAGS=\"-j$cpu_counts\"/g" $root_dir/etc/makepkg.conf
+    sed -i -e '/^#\[custom\]/,/^#Server = file:/s/\#//g' \
+        -e 's#Server = file.*$#Server = file:///work/cache/pacman/repo#g' \
+        -e 's@^#CacheDir.*/var/cache/pacman/pkg.*$@CacheDir = /work/cache/pacman/pkg/@g' \
+        $root_dir/etc/pacman.conf
+}
+
+make_system()
+{
+    need_root
+    print_env
 
     local cmd=""
+
+    case "$os_name" in
+        debian.*)
+            make_debian_base_system
+            ;;
+        archlinux)
+            make_archlinux_base_system
+            cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
+            cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm base-devel;"
+            ;;
+        *)
+            return
+            ;;
+    esac
+
     local zm_options=""
 
     zm_options="--install-zm $root_dir/"
@@ -1552,7 +1646,7 @@ make_system()
     zm_options=""
     zm_options+=" --zm-user $zm_user"
     zm_options+=" --zm-dir $zm_dir"
-    zm_options+=" --deb-ver $deb_ver"
+    zm_options+=" --os-name $os_name"
     zm_options+=" --arch $zm_arch"
     zm_options+=" auto_install"
     if $zm_debug;then
@@ -1575,7 +1669,7 @@ install_system()
     fi
 
     local install_dir
-    install_dir=$dst_dir/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+    install_dir=$dst_dir/linux/${zm_user}.${os_name}.${zm_arch}
     $SUDO mkdir -p $install_dir
 
     local root_sfs_file=$zm_dir/${root_sfs_name}
@@ -1616,9 +1710,9 @@ add_soft()
     echo "$@" >> $soft_list_file
 }
 
-apt_update()
+debian_apt_update()
 {
-    if [ ! -e /tmp/.zm_apt_update ];then
+    if [ ! -e /tmp/.zm_debian_apt_update ];then
         if which nc > /dev/null;then
             echo "Testing internet connect status..."
             # nc -v -w 3 www.baidu.com -z 80
@@ -1627,32 +1721,33 @@ apt_update()
 
         echo "update system..."
         $APTGET update
-        touch /tmp/.zm_apt_update
+        touch /tmp/.zm_debian_apt_update
     fi
 }
 
 default_zm_setup_apt()
 {
+    local deb_ver=${os_name#*.}
     temp_apt_src_file=$build_dir/sources.list
     > $temp_apt_src_file
-    echo "deb $apt_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
-    echo "deb-src $apt_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
+    echo "deb $src_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
+    echo "deb-src $src_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
     if [ "$deb_ver" != "unstable" ];then
-        echo "deb $apt_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
-        echo "deb $apt_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
-        echo "deb $apt_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $apt_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $apt_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $apt_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb $src_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb $src_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
+        echo "deb $src_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $src_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $src_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $src_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
     fi
     if ! diff $temp_apt_src_file /etc/apt/sources.list > /dev/null 2>&1;then
         mv $temp_apt_src_file /etc/apt/sources.list
     fi
 }
 
-add_base_softs()
+add_debian_base_softs()
 {
-    case $zm_arch in
+    case "$zm_arch" in
         amd64)
             kernel_softs="linux-image-amd64 linux-headers-amd64"; 
             ;;
@@ -1684,12 +1779,12 @@ add_base_softs()
 }
 
 
-download_softs()
+download_debian_softs()
 {
-    add_base_softs
+    add_debian_base_softs
     zm_user_command zm_add_softs
     zm_user_command zm_setup_apt
-    apt_update
+    debian_apt_update
 
     _download_soft()
     {
@@ -1703,8 +1798,15 @@ download_softs()
     fi
 }
 
-install_soft()
+download_archlinux_softs()
 {
+    echo ""
+}
+
+install_debian_soft()
+{
+    debian_apt_update
+
     param=$@
     test "$1" = "-qq" && shift
     if dpkg-query -f '${db:Status-Status}\n' -W $@ 2>&1 | grep -v ^installed > /dev/null 2>&1;then
@@ -1713,9 +1815,33 @@ install_soft()
     fi
 }
 
-install_softs()
+install_archlinux_soft()
+{
+    # pacman -Suy --noconfirm
+    pacman -S --needed --noconfirm $@
+}
+
+install_soft()
+{
+    case "$os_name" in
+        debian.*)
+            install_debian_soft $@
+            ;;
+        archlinux)
+            install_archlinux_soft $@
+            ;;
+        *)
+            return
+            ;;
+    esac
+}
+
+install_debian_softs()
 {
     print_env
+
+    # export DEBIAN_FRONTEND=gnome
+    export DEBIAN_FRONTEND=noninteractive
 
     if [ $zm_arch = "amd64" ];then
         $SUDO dpkg --add-architecture i386
@@ -1728,6 +1854,51 @@ install_softs()
     cat $soft_list_file | while read line; do install_soft -qq $line; done
 
     $SUDO $APTGET autoremove || true
+}
+
+install_archlinux_softs()
+{
+    add_soft base-devel
+    add_soft systemd-sysvcompat 
+    add_soft vim openssh wget dosfstools 
+    add_soft linux
+    add_soft squashfs-tools 
+    # add_soft 
+    # add_soft 
+    # add_soft 
+    # add_soft 
+    pacman -Suy --noconfirm
+    pacman -S --needed --noconfirm $(cat $soft_list_file)
+}
+
+download_softs()
+{
+    case "$os_name" in
+        debian.*)
+            download_debian_softs
+            ;;
+        archlinux)
+            download_archlinux_softs
+            ;;
+        *)
+            return
+            ;;
+    esac
+}
+
+install_softs()
+{
+    case "$os_name" in
+        debian.*)
+            install_debian_softs
+            ;;
+        archlinux)
+            install_archlinux_softs
+            ;;
+        *)
+            return
+            ;;
+    esac
 }
 
 dump_depends()
@@ -1810,6 +1981,21 @@ install_zm()
         $SUDO mkdir -p $_user_dir
         $SUDO $CP $zm_user_dir/. $_user_dir/
     fi
+
+    case "$os_name" in
+        debian.*)
+            local initramfs_dir=usr/share/initramfs-tools
+            $SUDO install -D $zm_workdir/common/sfsroot.initramfs.hooks $_root_dir/$initramfs_dir/hooks/sfsroot
+            $SUDO install -D $zm_workdir/common/sfsroot.boot $_root_dir/$initramfs_dir/scripts/local-premount/sfsroot
+            ;;
+        archlinux)
+            local initcpio_dir=etc/initcpio
+            $SUDO install -D $zm_workdir/common/sfsroot.boot $_root_dir/$initcpio_dir/hooks/sfsroot
+            $SUDO install -D $zm_workdir/common/sfsroot.initcpio.install $_root_dir/$initcpio_dir/install/sfsroot
+            ;;
+        *)
+            ;;
+    esac
 
     $SUDO mkdir -p $_root_dir/usr/bin
     $SUDO ln -svf /usr/share/zm/zm $_root_dir/usr/bin/zm
@@ -2194,7 +2380,7 @@ zm_config()
 {
 
     while [ $# -gt 0 ]; do
-        case $1 in
+        case "$1" in
             --root-sfs) zm_argv_del $1;shift; root_sfs_name=$1; zm_argv_del $1;shift; 
                 ;;
             --home-sfs) zm_argv_del $1;shift; home_sfs_name=$1; zm_argv_del $1;shift; 
@@ -2217,9 +2403,9 @@ zm_config()
                 ;;
             --arch) zm_argv_del $1;shift; zm_arch=$1; zm_argv_del $1;shift;
                 ;;
-            --apt-url) zm_argv_del $1;shift; apt_url="$1"; zm_argv_del "$1";shift;
+            --src-url) zm_argv_del $1;shift; src_url="$1"; zm_argv_del "$1";shift;
                 ;;
-            --deb-ver) zm_argv_del $1;shift; deb_ver=$1; zm_argv_del $1;shift;
+            --os-name) zm_argv_del $1;shift; os_name=$1; zm_argv_del $1;shift;
                 ;;
             --yes|-y) zm_argv_del $1;shift; zm_auto_select="yes";
                 ;;
@@ -2235,6 +2421,20 @@ zm_config()
                 ;;
         esac
     done
+
+    if [ -z "$zm_arch" ];then
+        case "$os_name" in
+            debian.*)
+                zm_arch=$(dpkg --print-architecture)
+                ;;
+            archlinux)
+                zm_arch="x86_64"
+                ;;
+            *)
+                err "zm_arch=$zm_arch error"
+                ;;
+        esac
+    fi
 
     if $zm_debug;then
         set -x
@@ -2288,12 +2488,11 @@ zm_config()
     test -z "$zm_root_passwd" && zm_root_passwd="$zm_user"
 
     if [ -z "$zm_dir" ];then
-        os_name="debian"
-        zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}.${deb_ver}
+        zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}
     fi
 
-    zm_user_home=$(grep $zm_user /etc/passwd | awk -F:  '{print $6}')
     if [ -z "$zm_user_dir" ];then
+        zm_user_home=$(echo ~$zm_user)
         if [ -d $zm_user_home/.zm ];then
             zm_user_dir=$zm_user_home/.zm
         else
@@ -2313,8 +2512,8 @@ zm_config()
         fi
     fi
 
-    if [ -e "$zm_user_dir/config.sh" ];then
-        source $zm_user_dir/config.sh
+    if [ -e "$zm_user_dir/${os_name}_config.sh" ];then
+        source $zm_user_dir/${os_name}_config.sh
     fi
     zm_user_command zm_user_init
 }
@@ -2322,7 +2521,7 @@ zm_config()
 zm_excute()
 {
     while [ $# -gt 0 ]; do
-        case $1 in
+        case "$1" in
             --install-grub) shift; install_grub $1; test -z "$1" || shift; 
                 ;;
             --update-grub-config) shift; update_grub_config $1; exit 0; 
@@ -2351,7 +2550,7 @@ zm_excute()
                 ;;
             --download-softs|-d) download_softs; shift;
                 ;;
-            --install-soft|-i) shift; apt_update; install_soft $@; exit 0; shift
+            --install-soft|-i) shift; install_soft $@; exit 0; shift
                 ;;
             --install-softs) install_softs; shift
                 ;;
@@ -2390,6 +2589,8 @@ zm_excute()
             --create-part) shift; init_lvm_partition $@; exit 0;
                 ;;
             --make-virtual-system) shift; make_virtual_system $@; exit 0;
+                ;;
+            --verbose) shift; print_env; exit 0;
                 ;;
             --version)
                 show_version; exit 0;
@@ -2443,6 +2644,8 @@ zm_init()
     kernel_ver=""
     kernel_params=""
 
+    os_name=$(show_os_name)
+
     zm_dir=""
     zm_user=""
     zm_user_dir=""
@@ -2450,28 +2653,21 @@ zm_init()
     build_dir=""
     keep_build_dir="no"
 
-    # deb_ver=testing
-    deb_ver=$(cat /etc/apt/sources.list | grep deb | awk '{print $3}' | head -1)
-    if [ "$deb_ver" != "stable" -a "$deb_ver" != "unstable" -a "$deb_ver" != "testing" ];then
-        deb_ver="stable"
-    fi
-
-    zm_arch=$(dpkg --print-architecture)
-
     # no multimedia
-    # apt_url=http://mirrors.163.com
-    apt_url=http://mirrors.aliyun.com
-    # apt_url=http://mirrors.sohu.com
+    # src_url=http://mirrors.163.com
+    src_url=http://mirrors.aliyun.com
+    # src_url=http://mirrors.sohu.com
 
     # have multimedia
-    # apt_url=http://free.nchc.org.tw
-    # apt_url=http://mirrors.ustc.edu.cn
-    # apt_url=http://mirrors.xmu.edu.cn
-    # apt_url=http://mirror.bjtu.edu.cn
+    # src_url=http://free.nchc.org.tw
+    # src_url=http://mirrors.ustc.edu.cn
+    # src_url=http://mirrors.xmu.edu.cn
+    # src_url=http://mirror.bjtu.edu.cn
 
     zm_auto_select="no"
 
     code_kernel_3_18=$(get_linux_kernel_code 3.18.0)
+    KERNEL_VERSION=$(uname -r | awk  -F '-' 'BEGIN{OFS="."}{print $1}' | awk  -F '.' 'BEGIN{OFS="."}{print $1,$2,$3}')
     code_kernel_now=$(get_linux_kernel_code $KERNEL_VERSION)
     #echo $code_kernel_3_18 $code_kernel_now
 
@@ -2522,7 +2718,36 @@ zm_uninit()
     fi
 }
 
+zm_info()
+{
+    case "$1" in
+        --print-workdir)
+            echo $zm_workdir
+            exit 0
+            ;;
+        --print-backup-workdir)
+            echo $backup_workdir
+            exit 0
+            ;;
+        --print-backup-mountdir)
+            echo $backup_mountdir
+            exit 0
+            ;;
+        --print-os-name)
+            # lsb_release -i -s
+            echo $os_name
+            exit 0
+            ;;
+        --print-max-branch)
+            echo $unionfs_max_branch
+            exit 0
+            ;;
+        *)
+            ;;
+    esac
+}
 
+ 
 ###############################################################################
 ###############################################################################
 ###############################################################################
@@ -2532,31 +2757,6 @@ if [ $# -eq 0 -o "$1" = "--help" ];then
     exit 0
 fi
 
-case $1 in
-    --print-workdir)
-        echo $zm_workdir
-        exit 0
-        ;;
-    --print-backup-workdir)
-        echo $backup_workdir
-        exit 0
-        ;;
-    --print-backup-mountdir)
-        echo $backup_mountdir
-        exit 0
-        ;;
-    --print-os-id)
-        lsb_release -i -s
-        exit 0
-        ;;
-    --print-max-branch)
-        echo $unionfs_max_branch
-        exit 0
-        ;;
-    *)
-        ;;
-esac
-
 zm_argv=$@
 zm_clean=true
 zm_debug=false
@@ -2564,6 +2764,7 @@ zm_debug=false
 export zm_debug
 
 zm_init
+zm_info $zm_argv
 zm_config $zm_argv
 zm_excute $zm_argv
 zm_uninit

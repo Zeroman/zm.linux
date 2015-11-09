@@ -1,0 +1,22 @@
+#!/bin/bash
+
+build() {
+    add_binary dd
+    add_binary df
+    add_binary mkswap
+    add_binary swapon
+    add_binary free
+    add_binary rsync
+    add_binary which
+    add_binary readlink
+    add_module overlay
+    add_runscript
+}
+
+help() {
+    cat <<HELPEOF
+sfsroot................................
+HELPEOF
+}
+
+# vim: set ft=sh ts=4 sw=4 et:

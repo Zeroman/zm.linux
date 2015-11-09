@@ -21,3 +21,7 @@ copy_exec /sbin/fsck.vfat /bin
 # copy_exec /sbin/mount.aufs /bin
 # copy_exec /usr/bin/pigz /bin
 # copy_exec /usr/bin/plzip /bin
+
+manual_add_modules squashfs
+manual_add_modules overlay
+manual_add_modules aufs

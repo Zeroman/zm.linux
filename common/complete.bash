@@ -1,6 +1,6 @@
 # zm(8) completion                                       -*- shell-script -*-
 
-zm_os_id=$(zm --print-os-id)
+zm_os_name=$(zm --print-os-name)
 zm_backup_workdir=$(zm --print-backup-workdir)
 zm_backup_mountdir=$(zm --print-backup-mountdir)
 
@@ -55,10 +55,8 @@ _zm()
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
-        --deb-ver)
-            local opts=""
-            [[ "$zm_os_id" == "Archlinux" ]] && opts=""
-            [[ "$zm_os_id" == "Debian" ]] && opts="stable testing unstable"
+        --os-name)
+            local opts="debian.stable debian.testing debian.unstable archlinux"
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
@@ -68,7 +66,7 @@ _zm()
           ;;
         --arch)
             local opts="amd64 i386"
-            [[ "$zm_os_id" == "Archlinux" ]] && opts="x86_64 i386"
+            [[ "$zm_os_name" == "Archlinux" ]] && opts="x86_64 i386"
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
