@@ -1532,7 +1532,8 @@ make_system()
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
         fi
-        debootstrap --arch $zm_arch ${deb_ver} $root_dir $apt_url/debian
+        local base_softs=aptitude,bash
+        debootstrap --include=$base_softs --arch=$zm_arch ${deb_ver} $root_dir $apt_url/debian
         if [ -d $cache_dir/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
         fi
