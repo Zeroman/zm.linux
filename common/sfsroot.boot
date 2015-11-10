@@ -20,7 +20,7 @@ os_name=""
 if uname -a | grep "Debian" > /dev/null 2>&1;then
     os_name="debian"
 fi
-if uname -a | grep "Arch" > /dev/null 2>&1;then
+if uname -a | grep "ARCH" > /dev/null 2>&1;then
     os_name="archlinux"
 fi
 
@@ -111,7 +111,7 @@ print_param_info()
 err_exit()
 {
     print_param_info
-    panic $@
+    goto_shell $@
 }
 
 print_msg()
@@ -205,7 +205,7 @@ mount_move()
     fi
 
     mkdir -p -m 0755 $new_mpath
-    mount -n -o move $old_mpath $new_mpath || err_exit "mount move $old_mpath $new_mpath error"
+    mount -n --move $old_mpath $new_mpath || err_exit "mount move $old_mpath $new_mpath error"
 }
 
 init_params()
@@ -461,7 +461,7 @@ __mount_with_overlay()
         break
     done
 
-    debug_var $lowerdir
+    debug_var lowerdir
 
     mkdir -p -m 0755 $upperdir/upper
     mkdir -p -m 0755 $upperdir/work

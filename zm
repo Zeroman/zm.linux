@@ -224,7 +224,7 @@ usage ()
     add_help "--syncdir-backup name dir" "sync backup to directory"
     add_help "--backup-info name" "print backup sfs info"
     add_help "-i,--install-soft name" "install soft"
-    add_help "--install-softs" "install all softs in ${os_name}_config.sh"
+    add_help "--install-softs" "install all softs in ${os_name}.config.sh"
     add_help "--make-virtual-system" "install system to virtual image file"
 
     add_help "--print-workdir" "print workdir"
@@ -985,7 +985,7 @@ StandardError=inherit
 KillMode=process
 IgnoreSIGPIPE=no
 SendSIGHUP=yes
-" > $chroot_dir/lib/systemd/system/zm.chroot.service
+" | $SUDO tee $chroot_dir/lib/systemd/system/zm.chroot.service
         $chroot_cmd systemd.unit=zm.chroot.service
         rm -f $chroot_dir/lib/systemd/system/zm.chroot.service
         return 0
@@ -1004,9 +1004,10 @@ SendSIGHUP=yes
         mkdir -p $chroot_dir/$cache_dir
         mount_device --bind $cache_dir $chroot_dir/$cache_dir
     fi
-
-    mkdir -p $root_dir/$zm_dir
-    mount_device --bind $zm_dir $root_dir/$zm_dir
+    if [ -d "$zm_dir" ];then
+        mkdir -p $root_dir/$zm_dir
+        mount_device --bind $zm_dir $root_dir/$zm_dir
+    fi
 
     echo "chroot to $chroot_dir "
     SHELL=/bin/bash unshare --fork --pid chroot $chroot_dir $@
@@ -1016,8 +1017,9 @@ SendSIGHUP=yes
         kill -9 $chroot_process
     fi
 
-    umount_device $chroot_dir/$zm_dir
-
+    if [ -d "$zm_dir" ];then
+        umount_device $chroot_dir/$zm_dir
+    fi
     if [ -d "$cache_dir" ];then
         umount_device $chroot_dir/$cache_dir
     fi
@@ -1280,7 +1282,7 @@ update_grub_config()
     check_dir_exist "$grubroot/$temp_path"
     check_dir_exist "$grubroot/boot/grub/config"
     echo "
-    menuentry 'ZM linux $zm_user ($zm_arch)' --class=submenu --class ${os_class} {
+    menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class ${os_class} {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
     set zm_dir=$temp_path
@@ -1585,12 +1587,13 @@ make_debian_base_system()
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
         fi
-        local base_softs=aptitude,bash,systemd-container
+        local base_softs=aptitude,bash,systemd-container,rsync,dosfstools
         debootstrap --include=$base_softs --arch=$zm_arch ${os_name#*.} $root_dir $src_url/debian
         if [ -d $cache_dir/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
         fi
     fi
+    sed -i "s/update_initramfs=yes/update_initramfs=no/g" $root_dir/etc/initramfs-tools/update-initramfs.conf
 }
 
 make_archlinux_base_system()
@@ -1634,16 +1637,17 @@ make_system()
             ;;
     esac
 
-    local zm_options=""
+    # local zm_options=""
+    # zm_options="--install-zm $root_dir/"
+    # test -z "$zm_user" || zm_options+=" --zm-user $zm_user"
+    # test -z "$zm_user_dir" || zm_options+=" --zm-userdir $zm_user_dir"
+    # $zm_path $zm_options 
 
-    zm_options="--install-zm $root_dir/"
-    test -z "$zm_user" || zm_options+=" --zm-user $zm_user"
-    test -z "$zm_user_dir" || zm_options+=" --zm-userdir $zm_user_dir"
-    $zm_path $zm_options 
+    install_zm $root_dir
 
     mkdir -p $zm_dir
 
-    zm_options=""
+    local zm_options=""
     zm_options+=" --zm-user $zm_user"
     zm_options+=" --zm-dir $zm_dir"
     zm_options+=" --os-name $os_name"
@@ -1765,6 +1769,7 @@ add_debian_base_softs()
     add_soft hdparm usbutils lshw 
     add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox mbr 
     add_soft iproute realpath rsync util-linux gpart debootstrap pciutils 
+    add_soft systemd-container
     add_soft e2fsprogs
     add_soft lftp less bc
     add_soft ssh openssh-server nfs-common 
@@ -1861,8 +1866,9 @@ install_archlinux_softs()
     add_soft base-devel
     add_soft systemd-sysvcompat 
     add_soft vim openssh wget dosfstools 
-    add_soft linux
+    add_soft linux man
     add_soft squashfs-tools 
+    zm_user_command zm_add_softs
     # add_soft 
     # add_soft 
     # add_soft 
@@ -2492,7 +2498,7 @@ zm_config()
     fi
 
     if [ -z "$zm_user_dir" ];then
-        zm_user_home=$(echo ~$zm_user)
+        zm_user_home=$(eval echo ~$zm_user)
         if [ -d $zm_user_home/.zm ];then
             zm_user_dir=$zm_user_home/.zm
         else
@@ -2512,8 +2518,8 @@ zm_config()
         fi
     fi
 
-    if [ -e "$zm_user_dir/${os_name}_config.sh" ];then
-        source $zm_user_dir/${os_name}_config.sh
+    if [ -e "$zm_user_dir/${os_name}.config.sh" ];then
+        source $zm_user_dir/${os_name}.config.sh
     fi
     zm_user_command zm_user_init
 }
