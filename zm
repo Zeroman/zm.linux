@@ -210,6 +210,7 @@ usage ()
     add_help "--chroot chroot_options" "like chroot options."
     add_help "--install-softs" "install softs."
     add_help "-m, --make-system [output dir]" "make system"
+    add_help "--setup" "setup system"
     add_help "--kernel-name" "kernel name"
     add_help "--kernel-ver" "kernel ver"
     add_help "--zm-dir" "zm system dir"
@@ -387,6 +388,24 @@ is_mounted()
         return 0
     fi
     return 1
+}
+
+is_installed()
+{
+    case "$os_name" in
+        debian.*)
+            if dpkg-query -f '${db:Status-Status}\n' -W $@ 2>&1 | grep -v ^installed > /dev/null 2>&1;then
+		return 1
+	    else
+		return 0
+	    fi
+            ;;
+        archlinux)
+            pacman -Qs $@ || return 1
+            ;;
+        *)
+            ;;
+    esac
 }
 
 mount_device()
@@ -1297,14 +1316,14 @@ update_grub_config()
     check_dir_exist "$grubroot/linux"
     # sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $grubroot/boot/grub/config/linux.cfg
     local linuxcfg=$grubroot/boot/grub/config/linux.cfg
-    > $linuxcfg
-    echo 'submenu "zm linux  ->" --class=submenu --class ${os_class} {
-    search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
-    echo "" >> $linuxcfg
+    echo "" | $SUDO tee $linuxcfg > /dev/null
+    echo "submenu 'zm linux  ->' --class=submenu --class ${os_class} {
+    search --no-floppy -l --set=root sfsroot 
+    " | $SUDO tee -a $linuxcfg > /dev/null
     items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
     if [ -n "$items" ];then
-        echo 'submenu "zm linux (old) ->" --class=submenu --class ${os_class} {
-        search --no-floppy -l --set=root sfsroot ' >> $linuxcfg
+        echo "submenu 'zm linux (old) ->' --class=submenu --class ${os_class} {
+        search --no-floppy -l --set=root sfsroot " | $SUDO tee -a $linuxcfg > /dev/null
         for dir in $items
         do
             echo "
@@ -1313,9 +1332,9 @@ update_grub_config()
             linux	\$zm_dir/vmlinuz
             initrd	\$zm_dir/initrd.img
             savedefault
-            } " >> $linuxcfg
+            } " | $SUDO tee -a $linuxcfg > /dev/null
         done
-        echo "}" >> $linuxcfg
+        echo "}" | $SUDO tee -a $linuxcfg > /dev/null
     fi
     items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep -v old || true)
     for dir in $items
@@ -1326,9 +1345,9 @@ update_grub_config()
         linux	\$zm_dir/vmlinuz
         initrd	\$zm_dir/initrd.img
         savedefault
-    } " >> $linuxcfg
+    } " | $SUDO tee -a $linuxcfg > /dev/null
     done
-    echo "}" >> $linuxcfg
+    echo "}" | $SUDO tee -a $linuxcfg > /dev/null
 
     umount_device $grubroot
     rmdir $grubroot
@@ -1546,7 +1565,7 @@ make_virtual_system()
     echo "kvm -m 1024 -hda $sfsroot_file"
     echo "kvm -m 2048 -hda $sfsroot_file -hdb $work_file"
     
-    local params=" -m 2048"
+    local params="-M q35 -m 2048"
     test -e $sfsroot_file && params+=" -drive file=$sfsroot_file,if=virtio"
     test -e $swap_file && params+=" -drive file=$swap_file,if=virtio"
     test -e $union_file && params+=" -drive file=$union_file,if=virtio"
@@ -1587,7 +1606,7 @@ make_debian_base_system()
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
         fi
-        local base_softs=aptitude,bash,systemd-container,rsync,dosfstools
+        local base_softs="aptitude,bash,rsync,dosfstools,initramfs-tools,systemd,docker.io"
         debootstrap --include=$base_softs --arch=$zm_arch ${os_name#*.} $root_dir $src_url/debian
         if [ -d $cache_dir/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
@@ -1658,6 +1677,7 @@ make_system()
     fi
     cmd+="zm $zm_options"
     $SUDO systemctl stop virtualbox.service || true
+    $SUDO systemctl stop nfs-common.service || true
     zm_chroot $root_dir $cmd
 }
 
@@ -1760,6 +1780,12 @@ add_debian_base_softs()
             ;;
     esac
 
+    case "$os_name" in
+        debian.unstable)
+            add_soft systemd-container
+            ;;
+    esac
+
     add_soft "$kernel_softs"
     add_soft locales 
     add_soft bash bash-completion
@@ -1769,7 +1795,7 @@ add_debian_base_softs()
     add_soft hdparm usbutils lshw 
     add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox mbr 
     add_soft iproute realpath rsync util-linux gpart debootstrap pciutils 
-    add_soft systemd-container
+    add_soft systemd
     add_soft e2fsprogs
     add_soft lftp less bc
     add_soft ssh openssh-server nfs-common 
@@ -1777,6 +1803,7 @@ add_debian_base_softs()
     add_soft netcat network-manager 
     add_soft dh-make
     add_soft qemu-guest-agent
+    add_soft apt-file
     # pigz lzip plzip pxz p7zip-full
 
     add_soft parted lvm2 initramfs-tools lsb-release genisoimage
@@ -1793,6 +1820,7 @@ download_debian_softs()
 
     _download_soft()
     {
+        test "$1" = "-f" && shift
         echo ">>>> download $@"
         $APTGET install -d -m $@
     }
@@ -1814,7 +1842,7 @@ install_debian_soft()
 
     param=$@
     test "$1" = "-qq" && shift
-    if dpkg-query -f '${db:Status-Status}\n' -W $@ 2>&1 | grep -v ^installed > /dev/null 2>&1;then
+    if ! is_installed $@;then
         echo ">>>> install $@"
         $APTGET install $param
     fi
@@ -2112,7 +2140,7 @@ zm_mount_backup()
     if ! readlink -e $bak_root_dir > /dev/null 2>&1;then
         $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
     fi
-    if ! mount | grep $bak_root_dir > /dev/null 2>&1;then
+    if ! is_mounted $bak_root_dir;then
         $SUDO mkdir -m 700 -p $bak_root_dir
         $SUDO mkdir -m 700 -p $bak_unionfs_dir
 
@@ -2315,7 +2343,7 @@ zm_umount_backup()
         bak_params='.'
     fi
 
-    $SUDO mount | grep $backup_mountdir > /dev/null 2>&1 || return
+    is_mounted $backup_mountdir || return
 
     if [ ! -e $backup_workdir ];then
         echo "zm backup dir is not exist."
@@ -2661,11 +2689,11 @@ zm_init()
 
     # no multimedia
     # src_url=http://mirrors.163.com
-    src_url=http://mirrors.aliyun.com
+    # src_url=http://mirrors.aliyun.com
     # src_url=http://mirrors.sohu.com
 
     # have multimedia
-    # src_url=http://free.nchc.org.tw
+    src_url=http://free.nchc.org.tw
     # src_url=http://mirrors.ustc.edu.cn
     # src_url=http://mirrors.xmu.edu.cn
     # src_url=http://mirror.bjtu.edu.cn
