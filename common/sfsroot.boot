@@ -374,6 +374,8 @@ init_sfs()
 
     test -b "$swap_part" || swap_part="$(get_zm_part 'swap')"
     test -b "$swap_part" && swapon $swap_part
+    swap_file "$sfs_part_mpath/swap.img"
+    swap_file "$work_mpath/swap.img"
 
     if is_mounted $union_mpath && test "$zm_save" = "yes";then
         union_root_mpath=$union_mpath/root
@@ -515,9 +517,12 @@ mount_home()
 
 swap_file() 
 {
-    chmod 600 $1
-    mkswap $1
-    swapon $1
+    if [ -f "$1" ];then
+        chmod 600 $1
+        chown root.root $1
+        mkswap $1
+        swapon $1
+    fi
 }
 
 move_to_newroot()
