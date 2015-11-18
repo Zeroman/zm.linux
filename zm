@@ -533,6 +533,7 @@ zm_copy_source()
 install_grub()
 {
     local grubdev=$1
+    local mntdir=$2
 
     grubdev=$(readlink -f "$grubdev")
 
@@ -545,16 +546,19 @@ install_grub()
     #激活扇区
     # sfdisk -A11 ${grubdev}
 
-    mount_device $grubdev $mnt_dir
-    install_grub_on_dir $mnt_dir
-    $SUDO grub-mkdevicemap -m $mnt_dir/boot/grub/device.map
+    if [ -z "$mntdir" ];then
+        mntdir=$mnt_dir
+        mount_device $grubdev $mntdir
+        install_grub_on_dir $mntdir
+        $SUDO grub-mkdevicemap -m $mntdir/boot/grub/device.map
+    fi
 
     local disk_device=${grubdev/p[0-9]*}
-    if [ "$disk_device" == "$grubdev" ];then
+    if [ "$disk_device" = "$grubdev" ];then
         disk_device=${grubdev/[0-9]*}
     fi
-    $SUDO grub-install $disk_device --no-floppy --root-directory=$mnt_dir --modules="biosdisk part_msdos"
-    umount_device $mnt_dir
+    $SUDO grub-install $disk_device --no-floppy --root-directory=$mntdir --modules="biosdisk part_msdos lvm"
+    umount_device $mntdir
 }
 
 install_grub_on_dir()
@@ -2556,7 +2560,7 @@ zm_excute()
 {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --install-grub) shift; install_grub $1; test -z "$1" || shift; 
+            --install-grub) shift; install_grub $@; exit 0; 
                 ;;
             --update-grub-config) shift; update_grub_config $1; exit 0; 
                 ;;
