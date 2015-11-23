@@ -1300,6 +1300,7 @@ update_grub_config()
     local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
     local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}
     local os_class=${os_name/.*}
+    local base_kernel_params="cgroup_enable=memory swapaccount=1" #for docker
 
     mount_device $grubdev $grubroot
     check_dir_exist "$grubroot/$temp_path"
@@ -1310,7 +1311,7 @@ update_grub_config()
     search --no-floppy --fs-uuid --set=root \$root_uuid
     set zm_dir=$temp_path
     echo 'Loading $zm_arch kernel...'
-    linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $kernel_params 
+    linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params 
     echo 'Loading $zm_arch initrd...'
     initrd \$zm_dir/${initrd_name}
     savedefault
@@ -1333,7 +1334,7 @@ update_grub_config()
             echo "
             menuentry '${dir}' --class=submenu --class ${os_class} {
             set     zm_dir=/linux/${dir}
-            linux	\$zm_dir/vmlinuz
+            linux	\$zm_dir/vmlinuz $base_kernel_params
             initrd	\$zm_dir/initrd.img
             savedefault
             } " | $SUDO tee -a $linuxcfg > /dev/null
@@ -1610,7 +1611,7 @@ make_debian_base_system()
             mkdir -p $root_dir/var/cache/apt/archives
             mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
         fi
-        local base_softs="aptitude,bash,rsync,dosfstools,initramfs-tools,systemd,docker.io"
+        local base_softs="aptitude,bash,rsync,dosfstools,initramfs-tools,systemd"
         debootstrap --include=$base_softs --arch=$zm_arch ${os_name#*.} $root_dir $src_url/debian
         if [ -d $cache_dir/apt-archives ];then
             umount_device $root_dir/var/cache/apt/archives
@@ -1800,6 +1801,7 @@ add_debian_base_softs()
     add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox mbr 
     add_soft iproute realpath rsync util-linux gpart debootstrap pciutils 
     add_soft systemd
+    add_soft docker.io
     add_soft e2fsprogs
     add_soft lftp less bc
     add_soft ssh openssh-server nfs-common 
@@ -2536,11 +2538,15 @@ zm_config()
         else
             if [ -d $zm_workdir/user/$zm_user ];then
                 zm_user_dir=$zm_workdir/user/$zm_user
+            else
+                zm_user_dir=""
             fi
         fi
     fi
-    # check_file_exist "$zm_user_dir"
-    test -z "$zm_user_dir" || zm_user_dir=$(readlink -f "$zm_user_dir")
+    if [ -n "$zm_user_dir" ];then
+        check_file_exist "$zm_user_dir"
+        zm_user_dir=$(readlink -f "$zm_user_dir")
+    fi
 
     if [ -z "$kernel_params" ];then
         if $zm_debug;then
@@ -2693,12 +2699,13 @@ zm_init()
 
     # no multimedia
     # src_url=http://mirrors.163.com
-    # src_url=http://mirrors.aliyun.com
+    src_url=http://mirrors.aliyun.com
     # src_url=http://mirrors.sohu.com
 
     # have multimedia
-    src_url=http://free.nchc.org.tw
+    # src_url=http://free.nchc.org.tw
     # src_url=http://mirrors.ustc.edu.cn
+    # src_url=http://ftp.hk.debian.org
     # src_url=http://mirrors.xmu.edu.cn
     # src_url=http://mirror.bjtu.edu.cn
 
