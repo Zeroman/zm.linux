@@ -209,6 +209,7 @@ usage ()
     add_help "-k, --keep-build" "Keep the temporary directory used to make the image."
     add_help "--chroot chroot_options" "like chroot options."
     add_help "--install-softs" "install softs."
+    add_help "--download-softs" "download all softs."
     add_help "-m, --make-system [output dir]" "make system"
     add_help "--setup" "setup system"
     add_help "--kernel-name" "kernel name"
@@ -268,7 +269,7 @@ debug_var()
 
 print_line()
 {
-    num=80
+    local num=80
     output_char='-'
     output_str=$(yes $output_char | head -$num | tr -d '\n')
     echo "$output_str"
@@ -553,9 +554,9 @@ install_grub()
         $SUDO grub-mkdevicemap -m $mntdir/boot/grub/device.map
     fi
 
-    local disk_device=${grubdev/p[0-9]*}
+    local disk_device=${grubdev//[0-9]*}
     if [ "$disk_device" = "$grubdev" ];then
-        disk_device=${grubdev/[0-9]*}
+        disk_device=${grubdev//[0-9]*}
     fi
     $SUDO grub-install $disk_device --no-floppy --root-directory=$mntdir --modules="biosdisk part_msdos lvm"
     umount_device $mntdir
@@ -607,7 +608,12 @@ init_lvm_partition()
     for part in ${parts[*]}
     do
         test -b $part || err "no partition $part"
-        parted set $part lvm on
+
+        local num=$(echo $part | sed -re 's/[^0-9]*([0-9]*).*$/\1/;')
+        local disk=$(echo $part | sed -re 's/([^0-9]*)[0-9]*$/\1/;')
+        if [ -n "$num" ];then
+            parted $disk set $num lvm on
+        fi
     done
 
     dialog_continue "create lvm part on ${parts[*]}."
@@ -2592,7 +2598,7 @@ zm_excute()
                 ;;
             --gen-usb-boot) shift; gen_usb_boot $1; test -z "$1" || shift;
                 ;;
-            --download-softs|-d) download_softs; shift;
+            --download-softs) download_softs; shift;
                 ;;
             --install-soft|-i) shift; install_soft $@; exit 0; shift
                 ;;
