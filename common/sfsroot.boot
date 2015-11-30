@@ -282,8 +282,8 @@ init_params()
         test $home_mem_size = 0 && home_mem_size=$free_mem_size
     fi
 
-    if which lvm > /dev/null;then
-        lvm vgchange -aly --ignorelockingfailure
+    if [ -e /scripts/local-top/lvm2 ];then
+        ROOT=/dev/mapper/${zm_name} /bin/sh /scripts/local-top/lvm2
     fi
 }
 
