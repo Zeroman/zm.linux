@@ -2722,8 +2722,17 @@ zm_excute()
     done
 }
 
+get_env_vars()
+{
+    if [ -d "$BACKUP_MOUNTDIR" ];then
+        backup_mountdir=$BACKUP_MOUNTDIR
+    fi
+}
+
 zm_init()
 {
+    get_env_vars
+
     CP="/bin/cp -raf"
 
     # aptitude -d -R -y install 
@@ -2791,6 +2800,7 @@ zm_init()
         unionfs_root_mpath=$union_mpath/root
         unionfs_home_mpath=$union_mpath/home
     fi
+
 }
 
 umount_all_device()
