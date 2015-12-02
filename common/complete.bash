@@ -2,7 +2,6 @@
 
 zm_os_name=$(zm --print-os-name)
 zm_backup_workdir=$(zm --print-backup-workdir)
-zm_backup_mountdir=$(zm --print-backup-mountdir)
 
 _complet_disk_part()
 {
@@ -11,6 +10,11 @@ _complet_disk_part()
         [ "$TYPE" = 'disk' -o "$TYPE" = 'part' ] && DEVICES+="$DEV "
     done < <(lsblk -pnro name,type)
     COMPREPLY=( $(compgen -W "$DEVICES" -- $cur) )
+}
+
+_get_all_sfs_names()
+{
+    echo $(basename -s .sfs -a "" $(cd $(zm --print-backup-mountdir);/bin/ls *.sfs 2>/dev/null))
 }
 
 _zm()
@@ -40,18 +44,18 @@ _zm()
             return 0
             ;;
         --mount-backup|--remove-backup|--backup-info|--syncdir-backup)
-            local opts=$(basename -s .sfs -a $(cd $zm_backup_mountdir;/bin/ls *.sfs 2> /dev/null))
+            local opts=$(_get_all_sfs_names)
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
         --umount-backup|--backup-branch)
-            local opts=$(basename -a $(cd $zm_backup_workdir;/bin/ls */ -d 2> /dev/null))
+            local opts=$(basename -a "$(cd $zm_backup_workdir;/bin/ls */ -d 2>/dev/null)")
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
         --zm-user)
             local zm_workdir=$(zm --print-workdir)
-            local opts=$(echo $USER $(basename -a $(cd $zm_workdir/user;/bin/ls */ -d 2> /dev/null)) | sort | uniq)
+            local opts=$(echo $USER $(basename -a "$(cd $zm_workdir/user;/bin/ls */ -d 2> /dev/null)") | sort | uniq)
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
@@ -117,7 +121,7 @@ _mb()
     local cur prev words cword
     _init_completion -n = || return
 
-    local opts=$(basename -s .sfs -a $(cd $zm_backup_mountdir;/bin/ls *.sfs 2> /dev/null))
+    local opts=$(_get_all_sfs_names)
     COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
     return 0
 } &&
