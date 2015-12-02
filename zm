@@ -435,7 +435,7 @@ mount_device()
 umount_device()
 {
     if [ -e $build_dir/.mount_devs ];then
-        $SUDO sh -c "cat /proc/mounts | grep $1 > /dev/null && umount $1 && sed -i \":^$1$:d\" $build_dir/.mount_devs || true"
+        $SUDO sh -c "cat /proc/mounts | grep ' $1 ' > /dev/null && umount $1 && sed -i \":^$1$:d\" $build_dir/.mount_devs || true"
     fi
 }
 
@@ -573,15 +573,16 @@ install_grub()
     log_info "install grub on $disk"
     dialog_continue "Install grub on $disk"
 
+    local rootpart=""
     if [ -b "$root" ];then
-        local rootpart=$root
+        rootpart=$root
         root=$mnt_dir
         mount_device $rootpart $root
     fi
     install_grub_on_dir $root
     $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
     $SUDO grub-install $disk --no-floppy --root-directory=$root --modules="${modules[*]}"
-    if [ -b "$root" ];then
+    if [ -b "$rootpart" ];then
         umount_device $root
     fi
 
@@ -598,6 +599,7 @@ init_lvm_partition()
     items['name']='zm'
     items['parts']=''
     items['sfsroot']='20G'
+    items['home']='20G'
     items['union']='20G'
     items['swap']='4G'
     items['backup']='50%VG'
@@ -622,19 +624,22 @@ init_lvm_partition()
     for part in ${parts[*]}
     do
         test -b $part || err "no partition $part"
+        if [ "${part:0:8}" = "/dev/nbd" ];then
+            continue
+        fi
 
         local num=$(echo $part | sed -re 's/[^0-9]*([0-9]*).*$/\1/;')
         local disk=$(echo $part | sed -re 's/([^0-9]*)[0-9]*$/\1/;')
         if [ -n "$num" ];then
-            parted $disk set $num lvm on
+            $SUDO parted $disk set $num lvm on
         fi
     done
 
     dialog_continue "create lvm part on ${parts[*]}."
 
     local vgname=${items['name']}
-    pvcreate ${parts[*]}
-    vgcreate $vgname ${parts[*]}
+    $SUDO pvcreate ${parts[*]}
+    $SUDO vgcreate $vgname ${parts[*]}
 
     create_part()
     {
@@ -650,18 +655,19 @@ init_lvm_partition()
         fi
 
         if expr index "$size" '%' > /dev/null;then
-            lvcreate -l $size -n ${name} $vgname
+            $SUDO lvcreate -l $size -n ${name} $vgname
         else
-            lvcreate -L $size -n ${name} $vgname
+            $SUDO lvcreate -L $size -n ${name} $vgname
         fi
 
         if [ "$name" = "swap" ];then
-            mkswap -f -L ${vgname}-swap /dev/mapper/${vgname}-${name}
+            $SUDO mkswap -f -L ${vgname}-swap /dev/mapper/${vgname}-${name}
         else
-            mkfs.ext4 -L ${vgname}-${name} /dev/mapper/${vgname}-${name}
+            $SUDO mkfs.ext4 -L ${vgname}-${name} /dev/mapper/${vgname}-${name}
         fi
     }
     create_part sfsroot ${items['sfsroot']}
+    create_part home ${items['home']}
     create_part union ${items['union']}
     create_part swap ${items['swap']}
     create_part backup ${items['backup']}
@@ -1418,6 +1424,80 @@ gen_usb_system()
     install_system $usb_root_device 
 }
 
+make_lvm_virtual_system()
+{
+    local img_file=/tmp/lvm.qcow2
+    local img_size=32G
+    local nbdindex=0
+
+    $SUDO rmmod nbd || true
+    $SUDO modprobe nbd max_part=16
+
+    init_qemu_disk $nbdindex $img_file $img_size qcow2
+    init_lvm_partition name=zm:parts=/dev/nbd${nbdindex}p1:sfsroot=10G:home=:backup=2G:swap=2G:union=2G:work=-
+    install_system /dev/mapper/zm-sfsroot
+    install_grub disk=/dev/nbd0:root=/dev/mapper/zm-sfsroot
+    update_grub_config /dev/mapper/zm-sfsroot
+    $SUDO vgchange -an zm
+    uninit_qemu_disk $nbdindex 
+    $SUDO vgscan --cache
+    $SUDO vgs
+}
+
+init_qemu_disk()
+{
+    local index=$1
+    local img_file=$2
+    local img_size=$3
+    local img_format=$4
+
+    if [ -z "$img_size" ];then
+        return 0
+    fi
+
+    if [ -e "$img_file" ];then
+        dialog_continue "$img_file exists, delete it?"
+        rm -f $img_file
+    fi
+
+    if [ ! -e "$img_file" ];then
+        qemu-img create -f $img_format "$img_file" "$img_size"
+    fi
+    $SUDO qemu-nbd --format=$img_format --cache=writeback -c /dev/nbd${index} $img_file
+    $SUDO dd if=/dev/zero of=/dev/nbd${index} bs=1k count=64
+    if [ -e /usr/lib/syslinux/mbr.bin ];then
+        $SUDO dd if=/usr/lib/syslinux/mbr.bin of=/dev/nbd${index}
+    fi
+    $SUDO parted -s -a optimal /dev/nbd${index} mklabel msdos
+    $SUDO parted -s -a optimal /dev/nbd${index} mkpart primary ext2 0% 100%
+
+    while [ ! -e /dev/nbd${index}p1 ];do
+        $SUDO blockdev --rereadpt /dev/nbd${index}
+        sleep 1
+    done
+}
+
+uninit_qemu_disk()
+{
+    local index=$1
+
+    $SUDO blockdev --flushbufs /dev/nbd${index}p1
+    $SUDO blockdev --flushbufs /dev/nbd${index}
+    $SUDO qemu-nbd -d /dev/nbd${index}
+}
+
+convert_qemu_img()
+{
+    local informat=$1
+    local outformat=$2
+    local inputfile=$3
+    local outputfile=$4
+
+    if [ "$informat" != "$outformat" ];then
+        qemu-img convert -f $informat -O $outformat $inputfile $outputfile
+    fi
+}
+
 make_virtual_system()
 {
     # check_binary install-mbr 
@@ -1485,57 +1565,7 @@ make_virtual_system()
     IFS='#'; dialog_continue "$info"; IFS=$OLD_IFS
     zm_auto_select="yes"
 
-    create_qemu_disk()
-    {
-        local index=$1
-        local img_file=$2
-        local img_size=$3
-
-        if [ -z "$img_size" ];then
-            return 0
-        fi
-
-        if [ -e "$img_file" ];then
-            dialog_continue "$img_file exists, delete it?"
-            rm -f $img_file
-        fi
-
-        if [ ! -e "$img_file" ];then
-            qemu-img create -f $orig_format "$img_file" "$img_size"
-        fi
-        $SUDO qemu-nbd --format=$orig_format --cache=writeback -c /dev/nbd${index} $img_file
-        $SUDO dd if=/dev/zero of=/dev/nbd${index} bs=1k count=64
-        if [ -e /usr/lib/syslinux/mbr.bin ];then
-            $SUDO dd if=/usr/lib/syslinux/mbr.bin of=/dev/nbd${index}
-        fi
-        $SUDO parted -s -a optimal /dev/nbd${index} mklabel msdos
-        $SUDO parted -s -a optimal /dev/nbd${index} mkpart primary ext2 0% 100%
-
-        while [ ! -e /dev/nbd${index}p1 ];do
-            $SUDO blockdev --rereadpt /dev/nbd${index}
-            sleep 1
-        done
-    }
-
-    uninit_qemu_disk()
-    {
-        local index=$1
-
-        $SUDO blockdev --flushbufs /dev/nbd${index}p1
-        $SUDO blockdev --flushbufs /dev/nbd${index}
-        $SUDO qemu-nbd -d /dev/nbd${index}
-    }
-
-    convert_file()
-    {
-        local format=$1
-        local inputfile=$2
-        local outputfile=$3
-
-        if [ "$format" != "$orig_format" ];then
-            qemu-img convert -f "$orig_format" -O $format $inputfile $outputfile
-        fi
-    }
+    
 
     $SUDO rmmod nbd || true
     $SUDO modprobe nbd max_part=16
@@ -1543,18 +1573,18 @@ make_virtual_system()
 
     local nbdindex=0
     if [ -n "$sfsroot_size" ];then
-        create_qemu_disk $nbdindex $sfsroot_qcow2_file $sfsroot_size
+        init_qemu_disk $nbdindex $sfsroot_qcow2_file $sfsroot_size $orig_format
         $SUDO mkfs.ext4 -L sfsroot /dev/nbd${nbdindex}p1
         install_system /dev/nbd${nbdindex}p1
         install_grub disk=/dev/nbd0:root=/dev/nbd${nbdindex}p1
         update_grub_config /dev/nbd${nbdindex}p1
-        uninit_qemu_disk 0
-        convert_file $disk_format $sfsroot_qcow2_file $sfsroot_file
+        uninit_qemu_disk $nbdindex
+        convert_qemu_img $orig_format $disk_format $sfsroot_qcow2_file $sfsroot_file
         nbdindex=$(expr $nbdindex + 1)
     fi
 
     if [ -n "$home_size" ];then
-        create_qemu_disk ${nbdindex} $home_qcow2_file $home_size
+        init_qemu_disk ${nbdindex} $home_qcow2_file $home_size $orig_format
         $SUDO mkfs.ext4 -L home /dev/nbd${nbdindex}p1
         if [ -e "$zm_dir/home.sfs" ];then
             mount_device -t tmpfs -o mode=755 tmpfs $unionfs_dir
@@ -1567,39 +1597,39 @@ make_virtual_system()
             umount_all_sfs $sfs_mnt_dir home
         fi
         uninit_qemu_disk ${nbdindex}
-        convert_file $disk_format $home_qcow2_file $home_file
+        convert_qemu_img $orig_format $disk_format $home_qcow2_file $home_file
         nbdindex=$(expr $nbdindex + 1)
     fi
 
     if [ -n "$work_size" ];then
-        create_qemu_disk ${nbdindex} $work_qcow2_file $work_size
+        init_qemu_disk ${nbdindex} $work_qcow2_file $work_size $orig_format
         $SUDO mkfs.ext4 -L work /dev/nbd${nbdindex}p1
         uninit_qemu_disk ${nbdindex}
-        convert_file $disk_format $work_qcow2_file $work_file
+        convert_qemu_img $orig_format $disk_format $work_qcow2_file $work_file
         nbdindex=$(expr $nbdindex + 1)
     fi
 
     if [ -n "$backup_size" ];then
-        create_qemu_disk ${nbdindex} $backup_qcow2_file $backup_size
+        init_qemu_disk ${nbdindex} $backup_qcow2_file $backup_size $orig_format
         $SUDO mkfs.ext4 -L backup /dev/nbd${nbdindex}p1
         uninit_qemu_disk ${nbdindex}
-        convert_file $disk_format $backup_qcow2_file $backup_file
+        convert_qemu_img $orig_format $disk_format $backup_qcow2_file $backup_file
         nbdindex=$(expr $nbdindex + 1)
     fi
 
     if [ -n "$swap_size" ];then
-        create_qemu_disk ${nbdindex} $swap_qcow2_file $swap_size
+        init_qemu_disk ${nbdindex} $swap_qcow2_file $swap_size $orig_format
         $SUDO mkswap -f -L swap /dev/nbd${nbdindex}p1
         uninit_qemu_disk ${nbdindex}
-        convert_file $disk_format $swap_qcow2_file $swap_file
+        convert_qemu_img $orig_format $disk_format $swap_qcow2_file $swap_file
         nbdindex=$(expr $nbdindex + 1)
     fi
 
     if [ -n "$union_size" ];then
-        create_qemu_disk $nbdindex $union_qcow2_file $union_size
+        init_qemu_disk $nbdindex $union_qcow2_file $union_size $orig_format
         $SUDO mkfs.ext4 -L union /dev/nbd${nbdindex}p1
         uninit_qemu_disk $nbdindex 
-        convert_file $disk_format $union_qcow2_file $union_file
+        convert_qemu_img $orig_format $disk_format $union_qcow2_file $union_file
         nbdindex=$(expr $nbdindex + 1)
     fi 
     )
@@ -1625,7 +1655,8 @@ make_virtual_system()
 default_zm_setup()
 {
     echo "change root password..."
-    echo root:'root' | chpasswd
+    echo root:'root' | $SUDO chpasswd
+    $SUDO systemctl disable cron.service
 }
 
 auto_install()
