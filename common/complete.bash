@@ -60,10 +60,14 @@ _zm()
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
-        --install-zm|--build-dir|--zm-userdir|--zm-dir|--chroot|--backup-dir|bak)
-          _filedir -d
-          return 0
-          ;;
+        --install-zm|--install-system|--build-dir|--zm-userdir|--zm-dir|--chroot|--backup-dir|bak)
+            _filedir -d
+            return 0
+            ;;
+        --update-grub-config)
+            _filedir -d
+            return 0
+            ;;
         --arch)
             local opts="amd64 i386"
             [[ "$zm_os_name" == "Archlinux" ]] && opts="x86_64 i386"
