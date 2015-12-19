@@ -356,9 +356,12 @@ init_sfs()
 
     root_sfs="$zm_dir/root.sfs"
     home_sfs="$zm_dir/home.sfs"
-    root_file=$(readlink -f $sfs_part_mpath/${root_sfs} || true)
-    home_file=$(readlink -f $sfs_part_mpath/${home_sfs} || true)
-    test -e "$root_file" || err_exit "Not found root sfs file!"
+    root_file=$sfs_part_mpath/${root_sfs}
+    home_file=$sfs_part_mpath/${home_sfs}
+
+    if ! readlink -e "$root_file";then
+        err_exit "Not found root sfs file!"
+    fi
 
     test -b "$home_part" || home_part="$(get_zm_part 'home')"
     test -b "$home_part" && mount_storage $home_part $home_mpath
@@ -399,8 +402,10 @@ __mount_with_aufs()
     test -d "$upperdir" || err_exit "upperdir: $upperdir is not found!"
     test -d "$mountdir" || err_exit "mountdir: $mountdir is not found!"
 
-    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
-    test -f "$sfsfile" || err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+    sfsfile="${sfsdir}/${sfsname}.sfs"
+    if ! readlink -e "$sfsfile";then
+        err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+    fi
 
     if [ -e "${upperdir}/$union_clean_file" ];then
         rm -rf ${upperdir}/{*,.[!.]*,..?*}
@@ -433,8 +438,10 @@ __mount_with_overlay()
     test -d "$upperdir" || err_exit "upperdir: $upperdir is not found!"
     test -d "$mountdir" || err_exit "mountdir: $mountdir is not found!"
 
-    sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
-    test -f "$sfsfile" || err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+    sfsfile="${sfsdir}/${sfsname}.sfs"
+    if ! readlink -e "$sfsfile";then
+        err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+    fi
 
     if [ -e "${upperdir}/$union_clean_file" ];then
         rm -rf ${upperdir}/{*,.[!.]*,..?*}
@@ -500,7 +507,7 @@ mount_home()
         return 0
     fi
 
-    if [ ! -e "$home_file" ];then
+    if ! readlink -e "$home_file";then
         goto_shell "home file is not found, maybe start with error, please check again." 
     fi
 

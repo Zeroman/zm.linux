@@ -150,7 +150,7 @@ dialog_checklist()
     local win_title=$1
     local list_title=$2
 
-    if [ -z "$win_title" -o -z "$list_title"];then
+    if [ -z "$win_title" -o -z "$list_title" ];then
         return 1
     fi
 
@@ -179,7 +179,7 @@ _add_samba_user()
 {
     user=$1
     passwd=$2
-    echo -e "$passwd\n$passwd" | smbpasswd -a $user -s
+    echo -e "$passwd\n$passwd" | $SUDO smbpasswd -a $user -s
 }
 
 
@@ -217,6 +217,7 @@ usage ()
     add_help "--zm-dir" "zm system dir"
     add_help "--zm-user" "zm system user's name"
     add_help "--zm-userdir" "zm system user's config dir"
+    add_help "--zm-user-init" "run zm user init scripts, ~/.zm/init"
     add_help "--backup-dir dir [name]" "backup dir to sfs"
     add_help "--backup-branch name" "backup dir branch"
     add_help "--remove-backup-branch name 0-$unionfs_max_branch" "remove backup branch"
@@ -1131,7 +1132,7 @@ gen_archlinux_initrd()
     defalut_install_dir $1
     kernel_ver=$(get_kernel_ver)
     backup_file $install_dir/${initrd_name}
-    mkinitcpio -A sfsroot -S autodetect -k "$kernel_ver" -g ${install_dir}/${initrd_name} 
+    $SUDO mkinitcpio -A sfsroot,lvm2 -S autodetect -k "$kernel_ver" -g ${install_dir}/${initrd_name} 
 }
 
 gen_initrd()
@@ -1656,7 +1657,21 @@ default_zm_setup()
 {
     echo "change root password..."
     echo root:'root' | $SUDO chpasswd
-    $SUDO systemctl disable cron.service
+    $SUDO systemctl disable cron.service || true
+}
+
+zm_set_hostname()
+{
+    local name="$1"
+
+    if [ -z "$name" ];then
+        name="ZM"
+    fi
+
+    $SUDO hostname $name
+    echo "$name" | $SUDO tee /etc/hostname
+    $SUDO sed -i "s/^127.0.0.1.*$/127.0.0.1	localhost.localdomain	localhost	 $name/g" /etc/hosts
+    $SUDO sed -i "s/^::1.*$/::1	localhost.localdomain	localhost	 $name/g" /etc/hosts
 }
 
 auto_install()
@@ -1664,7 +1679,11 @@ auto_install()
     test -d /run/lock/ || mkdir -p /run/lock
 
     install_softs
+
+    default_zm_setup
+    zm_set_hostname 
     zm_user_command zm_setup
+
     gen_root_sfs / $zm_dir/${root_sfs_name}
     # gen_home_sfs /home $zm_dir/${home_sfs_name}
     gen_kernel $zm_dir
@@ -1787,8 +1806,8 @@ install_system()
     $SUDO rsync -avP $root_sfs_file $install_dir
     $SUDO rsync -avP $root_sfs_file.[0-9] $install_dir || true
     if [ -e $home_sfs_file ];then
-        $SUDO rsync -avP $home_sfs_file $install_dir
-        $SUDO rsync -avP $home_sfs_file.[0-9] $install_dir || true
+        $SUDO rsync -avP --no-l -L $home_sfs_file $install_dir
+        $SUDO rsync -avP --no-l -L $home_sfs_file.[0-9] $install_dir || true
     fi
 
     $zm_path --install-zm $root_dir
@@ -1805,7 +1824,7 @@ install_system()
 
 add_soft()
 {	
-    echo "$@" >> $soft_list_file
+    echo "$@" | $SUDO tee -a $soft_list_file > /dev/null
 }
 
 debian_apt_update()
@@ -1925,7 +1944,7 @@ install_debian_soft()
 install_archlinux_soft()
 {
     # pacman -Suy --noconfirm
-    pacman -S --needed --noconfirm $@
+    $SUDO pacman -S --needed --noconfirm $@
 }
 
 install_soft()
@@ -1967,16 +1986,17 @@ install_archlinux_softs()
 {
     add_soft base-devel
     add_soft systemd-sysvcompat 
-    add_soft vim openssh wget dosfstools 
+    add_soft openssh wget dosfstools 
     add_soft linux man
     add_soft squashfs-tools 
+    add_soft lvm2
+    add_soft net-tools
+    # add_soft 
+    # add_soft 
+    # add_soft 
     zm_user_command zm_add_softs
-    # add_soft 
-    # add_soft 
-    # add_soft 
-    # add_soft 
-    pacman -Suy --noconfirm
-    pacman -S --needed --noconfirm $(cat $soft_list_file)
+    $SUDO pacman -Suy --noconfirm
+    $SUDO pacman -S --needed --noconfirm $(cat $soft_list_file)
 }
 
 download_softs()
@@ -2032,12 +2052,6 @@ zm_user_command()
         $cmd $*
         return
     fi
-
-    def_cmd="default_$cmd"
-    test -z "$def_cmd" && return
-    if command -v $def_cmd > /dev/null 2>&1;then
-        $def_cmd $*
-    fi
 }
 
 zm_add_groups()
@@ -2060,14 +2074,17 @@ zm_setup_user()
         $SUDO useradd -m -s /bin/bash -u $userid -g $userid $zm_user
         # useradd -m -s /bin/zsh -u $userid -g $userid $zm_user
         echo $zm_user:"$zm_user_passwd" | $SUDO chpasswd
-        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers
+        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers uucp
         # echo "
         # $zm_user    ALL=NOPASSWD: /bin/mount
         # $zm_user    ALL=NOPASSWD: /bin/umount
         # " > /etc/sudoers.d/$zm_user.mount
     fi
+    echo "$zm_user	ALL=(ALL:ALL) ALL" | $SUDO tee /etc/sudoers.d/$zm_user
     if [ -d "$work_mountdir" ];then
         $SUDO chown $zm_user:$zm_user $work_mountdir #-R   
+    fi
+    if [ -d "$HOME" ];then
         $SUDO chown $zm_user:$zm_user $HOME #-R
         # chown $zm_user:$zm_user $(cat /etc/passwd | grep $zm_user | awk -F: '{print $6}') #-R
     fi
@@ -2138,19 +2155,28 @@ zm_setup_tzdata()
 {
     area=$1
     zone=$2
-    echo "#!/bin/bash
-    . $zm_workdir/common/init_debconf.sh
+    case "$os_name" in
+        debian.*)
+            echo "#!/bin/bash
+            . $zm_workdir/common/init_debconf.sh
 
-    rm -f /etc/localtime
-    rm -f /etc/timezone
-    db_set tzdata/Areas '$area' || true
-    db_set tzdata/Zones/$area '$zone' || true
-    db_fset tzdata/Areas seen true || true
-    db_fset tzdata/Zones/$area seen true || true
+            rm -f /etc/localtime
+            rm -f /etc/timezone
+            db_set tzdata/Areas '$area' || true
+            db_set tzdata/Zones/$area '$zone' || true
+            db_fset tzdata/Areas seen true || true
+            db_fset tzdata/Zones/$area seen true || true
 
-    " > $build_dir/zm_debconf
-    run_zm_debconf $build_dir/zm_debconf
-    DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -u tzdata || true
+            " > $build_dir/zm_debconf
+            run_zm_debconf $build_dir/zm_debconf
+            DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -u tzdata || true
+            ;;
+        archlinux)
+            $SUDO timedatectl set-timezone $area/$zone
+            ;;
+        *)
+            ;;
+    esac
 }
 
 zm_setup_sh()
@@ -2572,7 +2598,7 @@ zm_config()
     dl_dir=$build_dir/dl
 
     soft_list_file=$build_dir/soft_list
-    rm -f $soft_list_file
+    $SUDO rm -f $soft_list_file
 
 
     mkdir -p $mnt_dir
@@ -2593,7 +2619,7 @@ zm_config()
         fi
     fi
     test -z "$zm_user_passwd" && zm_user_passwd="$zm_user"
-    test -z "$zm_root_passwd" && zm_root_passwd="$zm_user"
+    test -z "$zm_root_passwd" && zm_root_passwd="$zm_user_passwd"
 
     if [ -z "$zm_dir" ];then
         zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}
@@ -2634,6 +2660,10 @@ zm_excute()
 {
     while [ $# -gt 0 ]; do
         case "$1" in
+            --zm-user-init) zm_argv_del $1;shift; sh $zm_user_dir/init;
+                ;;
+            --set-hostname) zm_set_hostname $1
+                ;;
             --install-grub) shift; install_grub $@; exit 0; 
                 ;;
             --update-grub-config) shift; update_grub_config $1; exit 0; 
