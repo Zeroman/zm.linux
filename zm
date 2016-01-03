@@ -27,6 +27,8 @@ cache_dir=$work_mountdir/cache
 backup_mountdir=/media/backup
 backup_workdir=/media/bak
 
+archlinux_aur_softs=""
+
 
 log_file=/tmp/.zm.log
 > $log_file
@@ -1827,6 +1829,11 @@ add_soft()
     echo "$@" | $SUDO tee -a $soft_list_file > /dev/null
 }
 
+add_aur_soft()
+{
+    archlinux_aur_softs+=" $@"
+}
+
 debian_apt_update()
 {
     if [ ! -e /tmp/.zm_debian_apt_update ];then
@@ -1997,10 +2004,24 @@ install_archlinux_softs()
     zm_user_command zm_add_softs
     $SUDO pacman -Suy --noconfirm
     $SUDO pacman -S --needed --noconfirm $(cat $soft_list_file)
+
+    if [ -n "$archlinux_aur_softs" ];then
+        repo_dir=/work/cache/pacman/repo
+        $SUDO touch ${repo_dir}/custom.db
+        yaourt -Syu
+
+        for soft in $archlinux_aur_softs
+        do
+            if ! pacman -Q $soft > /dev/null 2>&1;then
+                yaourt -S --noconfirm $soft
+            fi
+        done
+    fi
 }
 
 download_softs()
 {
+    $SUDO rm -f $soft_list_file
     case "$os_name" in
         debian.*)
             download_debian_softs
@@ -2016,6 +2037,7 @@ download_softs()
 
 install_softs()
 {
+    $SUDO rm -f $soft_list_file
     case "$os_name" in
         debian.*)
             install_debian_softs
@@ -2598,8 +2620,6 @@ zm_config()
     dl_dir=$build_dir/dl
 
     soft_list_file=$build_dir/soft_list
-    $SUDO rm -f $soft_list_file
-
 
     mkdir -p $mnt_dir
     mkdir -p $iso_dir
