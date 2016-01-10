@@ -359,7 +359,7 @@ init_sfs()
     root_file=$sfs_part_mpath/${root_sfs}
     home_file=$sfs_part_mpath/${home_sfs}
 
-    if ! readlink -e "$root_file";then
+    if ! readlink -f "$root_file";then
         err_exit "Not found root sfs file!"
     fi
 
@@ -403,7 +403,7 @@ __mount_with_aufs()
     test -d "$mountdir" || err_exit "mountdir: $mountdir is not found!"
 
     sfsfile="${sfsdir}/${sfsname}.sfs"
-    if ! readlink -e "$sfsfile";then
+    if ! readlink -f "$sfsfile";then
         err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
     fi
 
@@ -439,7 +439,7 @@ __mount_with_overlay()
     test -d "$mountdir" || err_exit "mountdir: $mountdir is not found!"
 
     sfsfile="${sfsdir}/${sfsname}.sfs"
-    if ! readlink -e "$sfsfile";then
+    if ! readlink -f "$sfsfile";then
         err_exit "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
     fi
 
@@ -507,7 +507,7 @@ mount_home()
         return 0
     fi
 
-    if ! readlink -e "$home_file";then
+    if ! readlink -f "$home_file";then
         goto_shell "home file is not found, maybe start with error, please check again." 
     fi
 
