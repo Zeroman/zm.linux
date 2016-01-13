@@ -1687,7 +1687,9 @@ auto_install()
     zm_user_command zm_setup
 
     gen_root_sfs / $zm_dir/${root_sfs_name}
-    # gen_home_sfs /home $zm_dir/${home_sfs_name}
+    if [ ! -e "$zm_dir/${home_sfs_name}" ];then
+        gen_home_sfs /home $zm_dir/${home_sfs_name}
+    fi
     gen_kernel $zm_dir
     gen_initrd $zm_dir
 
@@ -2095,7 +2097,6 @@ zm_setup_user()
         $SUDO groupadd -g $userid $zm_user 
         $SUDO useradd -m -s /bin/bash -u $userid -g $userid $zm_user
         # useradd -m -s /bin/zsh -u $userid -g $userid $zm_user
-        echo $zm_user:"$zm_user_passwd" | $SUDO chpasswd
         zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers uucp
         # echo "
         # $zm_user    ALL=NOPASSWD: /bin/mount
@@ -2110,6 +2111,7 @@ zm_setup_user()
         $SUDO chown $zm_user:$zm_user $HOME #-R
         # chown $zm_user:$zm_user $(cat /etc/passwd | grep $zm_user | awk -F: '{print $6}') #-R
     fi
+    echo $zm_user:"$zm_user_passwd" | $SUDO chpasswd
     echo root:"$zm_root_passwd" | $SUDO chpasswd
 }
 
