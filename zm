@@ -1670,7 +1670,7 @@ zm_set_hostname()
     local name="$1"
 
     if [ -z "$name" ];then
-        name="ZM"
+        name="$zm_user"
     fi
 
     $SUDO hostname $name
