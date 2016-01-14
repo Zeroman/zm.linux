@@ -43,19 +43,19 @@ _zm()
             _complet_disk_part 
             return 0
             ;;
-        --mount-backup|--remove-backup|--backup-info|--syncdir-backup)
+        --mount-backup|--remove-backup|--backup-info|--syncdir-backup|--sync-backup)
             local opts=$(_get_all_sfs_names)
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
         --umount-backup|--backup-branch)
-            local opts=$(basename -a "$(cd $zm_backup_workdir;/bin/ls */ -d 2>/dev/null)")
+            local opts=$(dirname -- "$(cd $zm_backup_workdir;/bin/ls -d -- */ 2>/dev/null)")
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
         --zm-user)
             local zm_workdir=$(zm --print-workdir)
-            local opts=$(echo $USER $(basename -a "$(cd $zm_workdir/user;/bin/ls */ -d 2> /dev/null)") | sort | uniq)
+            local opts=$(echo $USER $(basename -a "$(cd $zm_workdir/user;/bin/ls -d -- */ 2> /dev/null)") | sort | uniq)
             COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
             return 0
             ;;
@@ -132,7 +132,7 @@ _umb()
     local cur prev words cword
     _init_completion -n = || return
 
-    local opts=$(basename -a $(cd $zm_backup_workdir;/bin/ls */ -d 2> /dev/null))
+    local opts=$(basename -a $(cd $zm_backup_workdir;/bin/ls -d -- */ 2>/dev/null))
     COMPREPLY=( $( compgen -W '$opts' -- "$cur" ) )
     return 0
 } &&

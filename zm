@@ -1,12 +1,13 @@
 #!/bin/bash -e
 
+zm_curdir=$PWD
 zm_path=$(readlink -f $0)
 zm_workdir=${zm_path%/*}
 
 SUDO=$(test "$(id -u)" = "0" || which sudo || true)
 
-zm_version=0.04
-zm_release=3
+zm_version=0.05
+zm_release=1
 
 
 set -e 
@@ -219,6 +220,8 @@ usage ()
     add_help "--zm-dir" "zm system dir"
     add_help "--zm-user" "zm system user's name"
     add_help "--zm-userdir" "zm system user's config dir"
+    add_help "--zm-user-passwd" "zm user's password"
+    add_help "--zm-root-passwd" "zm root's password"
     add_help "--zm-user-init" "run zm user init scripts, ~/.zm/init"
     add_help "--backup-dir dir [name]" "backup dir to sfs"
     add_help "--backup-branch name" "backup dir branch"
@@ -1748,7 +1751,8 @@ make_system()
         archlinux)
             make_archlinux_base_system
             cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
-            cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm base-devel;"
+            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which"
+            cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm $base_softs;"
             ;;
         *)
             return
@@ -1993,7 +1997,10 @@ install_debian_softs()
 
 install_archlinux_softs()
 {
-    add_soft base-devel
+    add_soft autoconf automake binutils
+    add_soft bison fakeroot flex libtool groff
+    add_soft make m4 patch pkg-config texinfo
+    add_soft gcc-multilib gcc-libs-multilib
     add_soft systemd-sysvcompat 
     add_soft openssh wget dosfstools 
     add_soft linux man
@@ -2403,6 +2410,47 @@ zm_remove_backup()
     done
 }
 
+zm_sync_backup()
+{
+    local bakname="$1"
+    local syncdir="$2"
+
+    if [ -z "$bakname" ];then
+        err "param error, bakname is blank."
+    fi
+
+    if [ -z "$syncdir" ];then
+        syncdir="$zm_curdir"
+    fi
+
+    local sfsfile=$backup_mountdir/${bakname}.sfs
+    if [ -e "$sfsfile" ];then
+        if [ -e $syncdir/${bakname}.sfs ];then
+            backup_file $syncdir/${bakname}.sfs*
+        fi
+        $SUDO rsync -avP ${sfsfile}* $syncdir/
+    fi
+
+    local bakpath=$(get_backup_unionfs_dir "$bakname")
+    local dstpath=$syncdir/unionfs/$bakname
+    if [ -d "$dstpath" ];then
+        backup_file "$dstpath"
+    fi
+
+    if [ -d "$bakpath" ];then
+        if [ "$(ls -A $bakpath)" != "" ];then
+            mkdir -p $syncdir/unionfs
+            $SUDO rsync -avP --delete $bakpath/ $dstpath
+        fi
+    fi
+}
+
+zm_revert_backup()
+{
+    local bakname="$1"
+    local syncdir="$2"
+}
+
 zm_syncdir_backup()
 {
     local bakname="$1"
@@ -2747,6 +2795,10 @@ zm_excute()
             --remove-backup) shift; zm_remove_backup $@; exit 0;
                 ;;
             --syncdir-backup) shift; zm_syncdir_backup $@; exit 0;
+                ;;
+            --sync-backup) shift; zm_sync_backup $@; exit 0;
+                ;;
+            --revert-backup) shift; zm_revert_backup $@; exit 0;
                 ;;
             --backup-info) shift; zm_backup_info $@; exit 0;
                 ;;
