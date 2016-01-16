@@ -1173,7 +1173,7 @@ gen_common_sfs()
         cat $temp_exclude_file
     fi
 
-    $SUDO mksquashfs ${srcdir} ${dstsfs}.new -comp lzo -regex -ef $temp_exclude_file
+    $SUDO mksquashfs ${srcdir} ${dstsfs}.new -comp lz4 -regex -ef $temp_exclude_file
 
     backup_file ${dstsfs} ${dstsfs}.[0-9]
     $SUDO mv ${dstsfs}.new ${dstsfs}
