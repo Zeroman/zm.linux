@@ -19,6 +19,7 @@ import atexit, stat
 
 global g_log
 global g_images
+global g_images_names
 global g_mounted
 
 g_config = {}
@@ -79,6 +80,8 @@ def read_config(file_name):
 
 def init_image_config():
     global g_images
+    global g_images_names
+    g_images_names = {}
     config_path = get_config(env.image_config)
     if not os.path.exists(config_path):
         g_log.warn(config_path + ' is not exist.')
@@ -88,6 +91,10 @@ def init_image_config():
     config_file = open(config_path, 'r')
     data = config_file.read()
     g_images = eval(data)
+    for k, v in g_images.items():
+        name = v['name']
+        if name != '':
+            g_images_names[name] = v
     config_file.close()
 
 
@@ -169,35 +176,33 @@ def pretty_date(tm=False):
         if second_diff < 10:
             return "just now"
         if second_diff < 60:
-            return str(second_diff) + " seconds ago"
+            return "%d seconds ago" % (second_diff)
         if second_diff < 120:
             return "a minute ago"
         if second_diff < 3600:
-            return str(second_diff / 60) + " minutes ago"
+            return "%d minutes ago" % (second_diff / 60)
         if second_diff < 7200:
             return "an hour ago"
         if second_diff < 86400:
-            return str(second_diff / 3600) + " hours ago"
+            return "%d hours ago" % (second_diff / 3600)
     if day_diff == 1:
         return "Yesterday"
     if day_diff < 7:
-        return str(day_diff) + " days ago"
+        return "%d days ago" % (day_diff)
     if day_diff < 31:
-        return str(day_diff / 7) + " weeks ago"
+        return "%d weeks ago" % (day_diff / 7)
     if day_diff < 365:
-        return str(day_diff / 30) + " months ago"
-    return str(day_diff / 365) + " years ago"
+        return "%d months ago" % (day_diff / 30)
+    return "%d years ago" % (day_diff / 365)
 
 
 def show_images():
     all_show = {}
-    ft = {'name': 0, 'hash': 0, 'base': 1, 'deps': 1, 'path': 0, 'size': 0, 'time': 0}
-    for k, v in g_images.items():
+    ft = {'name': 0, 'hash': 0, 'deps': 1, 'path': 0, 'size': 0, 'time': 0}
+    for k, v in g_images_names.items():
         show = {}
         show['name'] = k
         show['hash'] = v['hash']
-        base_str = v['base']
-        show['base'] = base_str if base_str != '' else '<None>'
         deps_str = ','.join(v['deps'])
         show['deps'] = deps_str if deps_str != '' else '<None>'
         show['path'] = v['path']
@@ -207,8 +212,8 @@ def show_images():
         for n in ft.keys():
             ft[n] = max(len(show[n]), ft[n])
 
-    show_order = ['name', 'hash', 'base', 'deps', 'time', 'size', 'path']
-    format_str = "%%-%ds %%%ds %%%ds %%%ds %%%ds %%%ds %%-%ds" % tuple([ft[s] for s in show_order])
+    show_order = ['name', 'hash', 'deps', 'time', 'size', 'path']
+    format_str = "%%-%ds %%%ds %%%ds %%%ds %%%ds %%-%ds" % tuple([ft[s] for s in show_order])
     for k in sorted(all_show.keys()):
         v = all_show[k]
         print(format_str % tuple(v[s] for s in show_order))
@@ -280,11 +285,12 @@ def add_all_options():
     exec_opt(lp="--show-images", func=show_images, help="show all images")
     exec_opt(lp="--add-backup", func=add_backup, argc=1, help="mount backup")
     exec_opt(lp="--create-backup", func=create_backup, argc=1, help="create backup")
+    exec_opt(lp="--remove-backup", func=remove_backup, argc=1, help="remove backup")
     exec_opt(lp="--mount-backup", func=mount_backup, argc=1, help="mount backup")
 
 
 def has_backup(bakname):
-    return bakname in g_images.keys()
+    return bakname in g_images_names.keys()
 
 
 def has_mounted(bakname):
@@ -299,15 +305,15 @@ def save_image_config():
     config_file.close()
 
 
-def add_image_config(name="", path="", base="", deps=()):
+def add_image_config(name="", path="", parent="", deps=()):
     if not os.path.exists(path):
         g_log.error("%s is not exist." % (path))
         return False
     if has_backup(name):
         g_log.error("backup: %s is exist." % (name))
         return False
-    if base != "" and not has_backup(base):
-        g_log.error("backup: %s is not exist." % (base))
+    if parent != "" and not has_backup(parent):
+        g_log.error("backup: %s is not exist." % (parent))
         return False
     for dep in deps:
         if not has_backup(dep):
@@ -315,26 +321,31 @@ def add_image_config(name="", path="", base="", deps=()):
             return False
     import random
     hash_str = "%016x" % random.getrandbits(64)
-    if name is '':
-        name = hash_str
     image = {}
     image['name'] = name
+    image['oldname'] = ''
     image['hash'] = hash_str
-    image['base'] = base
+    image['parent'] = parent
+    image['comment'] = "test"
     image['deps'] = deps
+    image['rdeps'] = []
     image['path'] = path
     image['size'] = os.stat(path).st_size
     image['time'] = datetime.today().strftime("%Y-%m-%d %X")
-    g_images[name] = image
+    g_images[hash_str] = image
     save_image_config()
+    if name != '':
+        g_images_names[name] = image
 
 
 def remove_backup(backup_name):
     if not has_backup(backup_name):
         g_log.error("remove backup error: %s is not exist." % (backup_name))
         return False
-    os.remove(g_images[backup_name]['path'])
-    del g_images[backup_name]
+    image = g_images_names[backup_name]
+    image['oldname'] = backup_name
+    image['name'] = ''
+    del g_images_names[backup_name]
     save_image_config()
 
 
@@ -354,12 +365,13 @@ def create_backup(bakdir):
         g_log.error(bakdir + " not exist.")
         sys.exit(1)
     backup_name = get_config(env.backup_name, os.path.basename(bakdir))
-    if has_backup(backup_name):
-        remove_backup(backup_name)
     # backup_file = os.path.join(get_config(env.backup_rootdir), backup_name + '.sfs')
-    backup_file = os.path.join("/tmp", backup_name + '.sfs')
+    tmstr = datetime.today().strftime("%y%m%d_%H%M%S")
+    backup_file = os.path.join("/tmp", "%s_%s.sfs" % (backup_name, tmstr))
     exclude = get_config(env.exclude, ())
     if mksquashfs(bakdir, backup_file, exclude):
+        if has_backup(backup_name):
+            remove_backup(backup_name)
         add_image_config(backup_name, backup_file)
 
 
@@ -368,9 +380,6 @@ def add_backup(bakfile):
 
 
 def mount_backup(bakname):
-    if bakname is "":
-        g_log.error("backup: backup name is null.")
-        return False
     if not has_backup(bakname):
         g_log.error("backup: %s is not exist." % (bakname))
         return False
@@ -426,12 +435,10 @@ def which(file):
 
 def run_cmd(cmd):
     g_log.info(cmd)
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    print(''.join(line.decode() for line in p.stdout.readlines()))
-    p.wait(3)
+    p = subprocess.Popen(cmd, bufsize=0, stdout=sys.stdout, stderr=sys.stderr, shell=True)
+    p.wait()
     if p.returncode != 0:
-        g_log.info('return %d' % (p.returncode))
-        g_log.error(''.join(line.decode() for line in p.stderr.readlines()))
+        g_log.error('return %d' % (p.returncode))
         return False
     return True
 
