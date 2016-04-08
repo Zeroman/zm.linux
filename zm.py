@@ -56,7 +56,7 @@ env = Enum([
     'build_dir',
     'backup_name',
     'backup_rootdir',
-    'backup_workdir',
+    'backup_tempdir',
     'backup_mountdir',
 ])
 
@@ -344,6 +344,7 @@ def add_all_options():
     exec_opt(lp="--create-backup", func=create_backup, argc=1, help="create backup")
     exec_opt(lp="--remove-backup", func=remove_backup, argc=1, help="remove backup")
     exec_opt(lp="--mount-backup", func=mount_backup, argc=1, help="mount backup")
+    exec_opt(lp="--umount-backup", func=umount_backup, argc=1, help="umount backup")
     exec_opt(lp="--check-backup", func=check_backup, argc=1, help="check backup")
 
 
@@ -379,7 +380,7 @@ def has_mounted(name):
     return name in g_mounted.keys()
 
 
-def add_image_config(name="", path="", parent="", deps=()):
+def add_image_config(name="", path="", type="", parent="", deps=()):
     if not os.path.exists(path):
         g_log.error("%s is not exist." % (path))
         return False
@@ -403,6 +404,7 @@ def add_image_config(name="", path="", parent="", deps=()):
     image['comment'] = "test"
     image['deps'] = deps
     image['rdeps'] = []
+    image['type'] = type
     image['path'] = path
     image['size'] = os.stat(path).st_size
     image['time'] = datetime.today().strftime("%Y-%m-%d %X")
@@ -450,14 +452,19 @@ def create_backup(bakdir):
         g_log.error(bakdir + " not exist.")
         sys.exit(1)
     backup_name = get_config(env.backup_name, os.path.basename(bakdir))
-    # backup_file = os.path.join(get_config(env.backup_rootdir), backup_name + '.sfs')
+    backup_rootdir = get_config(env.backup_rootdir)
     tmstr = datetime.today().strftime("%y%m%d_%H%M%S")
-    backup_file = os.path.join("/tmp", "%s_%s.sfs" % (backup_name, tmstr))
+    backup_file = os.path.join(backup_rootdir, "%s_%s.sfs" % (backup_name, tmstr))
+    if os.path.exists(backup_file):
+        g_log.error("%s is exist, can't create backup." % (backup_file))
+        return False
     exclude = get_config(env.exclude, ())
+    if has_backup(backup_name):
+        g_log.info("backup %s is exist." % (backup_name))
     if mksquashfs(bakdir, backup_file, exclude):
-        if has_backup(backup_name):
-            remove_backup(backup_name)
-        add_image_config(backup_name, backup_file)
+        remove_backup(backup_name)
+        add_image_config(backup_name, backup_file, 'sfs')
+    return True
 
 
 def add_backup(bakfile):
@@ -469,11 +476,35 @@ def mount_backup(name):
         return False
     if has_mounted(name):
         g_log.warning("backup: %s is mounted." % (name))
-        return True
-    bakrootdir = os.path.join(get_config(env.backup_workdir), name)
-    work_dir = "/w"
-    mounted_path = ["/a", "/b"]
+        return False
+    image = get_backup(name)
+    tempdir = os.path.join(get_config(env.backup_tempdir), image['hash'])
+    mounted_path = []
+    if not os.path.exists(tempdir):
+        run_cmd_root("mkdir -p %s" % tempdir)
+    run_cmd_root("mount %s %s" % (image['path'], tempdir))
+    mounted_path.append(tempdir)
+    # run_cmd_root("mount %s %s" %(image['path'], tempdir))
+    work_dir = "/work/jkfwewk"
     add_mounted_config(name, work_dir, tuple(mounted_path))
+    return True
+
+
+def umount_backup(name):
+    if not has_mounted(name):
+        g_log.warning("backup: %s is not mounted." % (name))
+        return False
+    ret = False
+    image = g_mounted[name]
+    for path in image['mounted_path'][::-1]:
+        if not run_cmd_root("umount %s" % (path)):
+            break
+        image['mounted_path'].pop(0)
+    if len(image['mounted_path']) == 0:
+        del g_mounted[name]
+        ret = True
+    save_json_config(get_config(env.mounted_config), g_mounted)
+    return ret
 
 
 def run_option(o, p, t="config"):
@@ -506,7 +537,9 @@ def default_env():
     set_config(env.debug, False)
     set_config(env.confirm, True)
 
-    set_config(env.backup_rootdir, "/media/backup")
+    set_config(env.backup_tempdir, "/media/backup.temp")
+    # set_config(env.backup_rootdir, "/media/backup")
+    set_config(env.backup_rootdir, "/tmp")
     set_config(env.backup_mountdir, "/media/bak")
 
     # set_config(env.image_config, "/media/backup/image.json")
