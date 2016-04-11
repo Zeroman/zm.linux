@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import fcntl
+import hashlib
 import logging
 import os
 import sys
@@ -408,6 +409,10 @@ def add_image_config(name="", path="", type="", parent="", deps=()):
     image['path'] = path
     image['size'] = os.stat(path).st_size
     image['time'] = datetime.today().strftime("%Y-%m-%d %X")
+    g_log.info("sha1 %s now." % (path))
+    sha1obj = hashlib.sha1()
+    sha1obj.update(open(path, 'rb').read())
+    image['sha1'] = sha1obj.hexdigest()
     g_images[hash_str] = image
     save_json_config(get_config(env.image_config), g_images)
     if name != '':
@@ -462,7 +467,8 @@ def create_backup(bakdir):
     if has_backup(backup_name):
         g_log.info("backup %s is exist." % (backup_name))
     if mksquashfs(bakdir, backup_file, exclude):
-        remove_backup(backup_name)
+        if has_backup(backup_name):
+            remove_backup(backup_name)
         add_image_config(backup_name, backup_file, 'sfs')
     return True
 
