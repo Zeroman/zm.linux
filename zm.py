@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import fcntl
@@ -48,12 +48,23 @@ class Const(object):
         raise (NameError, name)
 
 
-const = Const()
-const.image_type = 'type'
-const.mount_type = 'mount_type'
-const.mounted = 'mounted'
-const.extract = 'extract'
-const.cmd = 'command'
+c = Const()
+c.image_type = 'type'
+c.mount_type = 'mount_type'
+c.mounted = 'mounted'
+c.extract = 'extract'
+c.cmd = 'command'
+c.used = 'used'
+c.name = 'name'
+c.time_format = "%Y-%m-%d %X %f"
+c.sfs = 'sfs'
+c.dir = 'dir'
+c.parent = 'parent'
+c.hash = 'hash'
+c.deps = 'deps'
+c.by = 'by'
+c.opath = 'outpath'
+c.time = 'time'
 
 env = Enum([
     'arch',
@@ -134,7 +145,7 @@ def init_image_config():
         return
     g_images = read_json_config(config_path)
     for k, v in g_images.items():
-        name = v['name']
+        name = v[c.name]
         if name != '':
             g_image_names[name] = v
 
@@ -151,10 +162,10 @@ def init_mounted_config():
     if os.path.exists(extract_path):
         extract_images = read_json_config(extract_path)
     for k, v in mounted_images.items():
-        v[const.mount_type] = const.mounted
+        v[c.mount_type] = c.mounted
         g_images_dir[k] = v
     for k, v in extract_images.items():
-        v[const.mount_type] = const.extract
+        v[c.mount_type] = c.extract
         g_images_dir[k] = v
 
 
@@ -162,9 +173,9 @@ def save_mounted_config(mounted=False, extract=False):
     mounted_images = {}
     extract_images = {}
     for k, v in g_images_dir.items():
-        if mounted and v[const.mount_type] == const.mounted:
+        if mounted and v[c.mount_type] == c.mounted:
             mounted_images[k] = v
-        elif extract and v[const.mount_type] == const.extract:
+        elif extract and v[c.mount_type] == c.extract:
             extract_images[k] = v
     if mounted:
         mounted_path = get_config(env.mounted_config)
@@ -196,7 +207,7 @@ def get_config(node, defvalue=""):
     return env_config[node]
 
 
-def show_map(map, prefix=""):
+def show_map_1level(map, prefix=""):
     if map is None or len(map) == 0:
         return
     max_len = max(len(i) for i in map.keys())
@@ -207,7 +218,7 @@ def show_map(map, prefix=""):
 
 def show_all_config():
     env_config = g_config['env']
-    show_map(env_config)
+    show_map_1level(env_config)
 
 
 def humanize_filesize(size):
@@ -230,6 +241,14 @@ def get_dirsize(start_path=None):
     return total_size
 
 
+def pretty_name(name):
+    image = get_backup(name)
+    name = image[c.name]
+    if name == "":
+        name = image['oldname']
+    return "%s(%s:%s)" % (image[c.hash], name, image[c.image_type])
+
+
 def pretty_date(tm=False):
     now = datetime.now()
     diff = now - now
@@ -238,7 +257,7 @@ def pretty_date(tm=False):
     elif isinstance(time, datetime):
         diff = now - tm
     elif type(tm) is str:
-        t = time.strptime(tm, "%Y-%m-%d %H:%M:%S")
+        t = time.strptime(tm, c.time_format)
         d = datetime(*t[:6])
         diff = now - d
 
@@ -272,27 +291,62 @@ def pretty_date(tm=False):
     return "%d years ago" % (day_diff / 365)
 
 
+def show_map(base, map_data):
+    data = map_data.items()
+    while data:
+        k, v = data.pop(0)
+        sys.stdout.write('%s->%s' % (base, k))
+        items = v.items()
+        if len(items) == 1:
+            (ik, iv) = items[0]
+            if not iv.items():
+                # sys.stdout.write('->%s' % ik)
+                sys.stdout.write('\n')
+                continue
+        sys.stdout.write('\n')
+        if data:
+            show_map(base + '|   ', v)
+        else:
+            show_map(base + '    ', v)
+
+
+def show_image(name, level=0):
+    image = get_backup(name)
+    if image is None:
+        g_log.error("no backup %s" % name)
+        return
+    name = image[c.name]
+    type = image[c.image_type]
+    if name == "":
+        name = image['oldname']
+    info = "%s (%s %s) %s" % (image[c.hash], name, type, image['path'])
+    print('' + '  ' * level + '└─' + info)
+    parent = image[c.parent]
+    if parent is not None:
+        show_image(parent, level=(level + 1))
+
+
 def show_images():
     all_show = {}
-    ft = {'name': 0, 'hash': 0, 'deps': 1, 'path': 0, 'size': 0, 'time': 0}
+    ft = {c.name: 0, c.hash: 0, c.deps: 1, 'path': 0, 'size': 0, c.time: 0}
     for k, v in g_image_names.items():
         show = {}
-        show['name'] = k
-        show['hash'] = v['hash']
-        deps_str = ','.join(v['deps'])
-        show['deps'] = deps_str if deps_str != '' else '<None>'
+        show[c.name] = k
+        show[c.hash] = v[c.hash]
+        deps_str = ','.join(v[c.deps])
+        show[c.deps] = deps_str if deps_str != '' else '<None>'
         show['path'] = v['path']
-        if v[const.image_type] == 'dir':
+        if v[c.image_type] == c.dir:
             size = get_dirsize(v['path'])
         else:
             size = v['size']
         show['size'] = humanize_filesize(size)
-        show['time'] = ' ' + pretty_date(v['time']) + ' '
+        show[c.time] = ' ' + pretty_date(v[c.time]) + ' '
         all_show[k] = show
         for n in ft.keys():
             ft[n] = max(len(show[n]), ft[n])
 
-    show_order = ['name', 'hash', 'deps', 'time', 'size', 'path']
+    show_order = [c.name, c.hash, c.deps, c.time, 'size', 'path']
     format_str = "%%-%ds %%%ds %%%ds %%%ds %%%ds %%-%ds" % tuple([ft[s] for s in show_order])
     for k in sorted(all_show.keys()):
         v = all_show[k]
@@ -301,23 +355,23 @@ def show_images():
 
 def show_old_images():
     all_show = {}
-    ft = {'name': 0, 'hash': 0, 'deps': 1, 'path': 0, 'size': 0, 'time': 0}
+    ft = {c.name: 0, c.hash: 0, c.deps: 1, 'path': 0, 'size': 0, c.time: 0}
     for k, v in g_images.items():
-        if v['name'] != "":
+        if v[c.name] != "":
             continue
         show = {}
-        show['name'] = v['oldname']
-        show['hash'] = v['hash']
-        deps_str = ','.join(v['deps'])
-        show['deps'] = deps_str if deps_str != '' else '<None>'
+        show[c.name] = v['oldname']
+        show[c.hash] = v[c.hash]
+        deps_str = ','.join(v[c.deps])
+        show[c.deps] = deps_str if deps_str != '' else '<None>'
         show['path'] = v['path']
         show['size'] = humanize_filesize(v['size'])
-        show['time'] = ' ' + pretty_date(v['time']) + ' '
+        show[c.time] = ' ' + pretty_date(v[c.time]) + ' '
         all_show[k] = show
         for n in ft.keys():
             ft[n] = max(len(show[n]), ft[n])
 
-    show_order = ['name', 'hash', 'deps', 'time', 'size', 'path']
+    show_order = [c.name, c.hash, c.deps, c.time, 'size', 'path']
     format_str = "%%-%ds %%%ds %%%ds %%%ds %%%ds %%-%ds" % tuple([ft[s] for s in show_order])
     for k in sorted(all_show.keys()):
         v = all_show[k]
@@ -326,42 +380,46 @@ def show_old_images():
 
 def show_mounted():
     all_show = {}
-    ft = {'name': 0, 'outpath': 0, 'time': 1, 'used': 0, 'tm': 0}
+    ft = {
+        c.name: [0, '%%-%ds'],
+        c.opath: [0, '%%-%ds'],
+        c.time: [1, '%%%ds'],
+        c.by: [0, '%%%ds'],
+        c.used: [0, '%%%ds'],
+        'tm': [0, '%%%ds'],
+    }
     for k, v in g_images_dir.items():
-        show = {}
-        name = v['name']
-        oldname = v['oldname']
-        if name != "":
-            show['name'] = name
-        else:
-            show['name'] = "%s(%s)" % (k, oldname)
-        show['outpath'] = v['outpath']
-        show['time'] = ' ' + pretty_date(v['time']) + ' '
-        show['tm'] = v['time']
-        show['used'] = str(v['used'])
+        show = {
+            c.name: pretty_name(v[c.hash]),
+            c.opath: v[c.opath],
+            c.time: ' ' + pretty_date(v[c.time]) + ' ',
+            'tm': v[c.time],
+            c.by: str(len(v[c.by])),
+            c.used: str(len(v[c.used]))
+        }
         all_show[k] = show
         for n in ft.keys():
-            ft[n] = max(len(show[n]), ft[n])
+            ft[n][0] = max(len(show[n]), ft[n][0])
 
-    show_order = ['name', 'outpath', 'used', 'time']
-    format_str = "%%-%ds %%-%ds %%%ds %%%ds" % tuple([ft[s] for s in show_order])
+    show_order = [c.name, c.opath, c.by, c.used, c.time]
+    format_str = ' '.join([ft[s][1] for s in show_order]) % tuple([ft[s][0] for s in show_order])
 
-    for (k, v) in sorted(all_show.items(), key=lambda d: time.strptime(d[1]['tm'], "%Y-%m-%d %H:%M:%S"),
-                         reverse=True):
+    for (k, v) in sorted(all_show.items(), key=lambda d: time.strptime(d[1]['tm'], c.time_format), reverse=True):
         print(format_str % tuple(v[s] for s in show_order))
 
 
 def add_option(sp='', lp='', argc=0, func=None, t='config', help='', values=None):
     if sp == '' and lp == '':
         return False
-    opt = {}
-    opt['sp'] = sp
-    opt['lp'] = lp
-    opt['argc'] = argc
-    opt['func'] = func
-    opt['help'] = help
-    opt[const.image_type] = t
-    opt['values'] = values
+    opt = {
+        'sp': sp,
+        'lp': lp,
+        'argc': argc,
+        'func': func,
+        'help': help,
+        c.image_type: t,
+        'values': values
+    }
     if sp != "":
         g_config['opt'][sp] = opt
     if lp != "":
@@ -370,7 +428,6 @@ def add_option(sp='', lp='', argc=0, func=None, t='config', help='', values=None
 
 
 def config_opt(sp='', lp='', key='', value=None, argc=0, help='', values=None):
-    func = None
     if argc > 0 and value is None:
         func = lambda arg1: set_config(key, arg1)
     else:
@@ -412,16 +469,18 @@ def add_all_options():
     config_opt('', '--backup-deps', env.backup_deps, None, 1, help="create backup deps params")
     config_opt('', '--backup-parent', env.backup_parent, None, 1, help="create backup parent")
 
-    config_opt('', '--backup-name', env.backup_name, False, 0, help="config backup name")
+    config_opt('', '--backup-name', env.backup_name, None, 1, help="config backup name")
 
     exec_opt('-h', '--help', func=usage, help="show usage")
     exec_opt(lp="--show-env", func=show_all_config, help="show all env config")
     exec_opt(lp="--show-images", func=show_images, help="show all images")
     exec_opt(lp="--show-oldimages", func=show_old_images, help="show old images")
     exec_opt(lp="--show-mounted", func=show_mounted, help="show all mounted")
+    exec_opt(lp="--show-image", func=show_image, argc=1, help="show image by param")
     exec_opt(lp="--add-backup", func=add_backup, argc=1, help="mount backup")
     exec_opt(lp="--create-backup", func=create_backup_cmd, argc=1, help="create backup")
     exec_opt(lp="--remove-backup", func=remove_backup, argc=1, help="remove backup")
+    exec_opt(lp="--compact-backup", func=compact_backup, argc=1, help="compact backup of sfs type")
     exec_opt(lp="--mount-backup", func=mount_backup, argc=1, help="mount backup")
     exec_opt(lp="--umount-backup", func=umount_backup, argc=1, help="umount backup")
     exec_opt(lp="--check-backup", func=check_backup, argc=1, help="check backup")
@@ -451,7 +510,7 @@ def check_backup(name):
     if not os.path.exists(image_path):
         g_log.error("%s : file %s is not exist." % (name, image_path))
         ret = False
-    for dep in image['deps']:
+    for dep in image[c.deps]:
         ret &= check_backup(dep)
     return ret
 
@@ -481,15 +540,15 @@ def add_image_config(name="", path="", type="", parent=None, deps=()):
     import random
     hash_str = "%016x" % random.getrandbits(64)
     image = {}
-    image['name'] = name
+    image[c.name] = name
     image['oldname'] = ""
-    image['hash'] = hash_str
-    image['parent'] = parent
-    image['comment'] = "test"
-    image['deps'] = deps
+    image[c.hash] = hash_str
+    image[c.parent] = parent
+    image['comment'] = ""
+    image[c.deps] = deps
     image['rdeps'] = []
-    image[const.image_type] = type
-    image['time'] = datetime.today().strftime("%Y-%m-%d %X")
+    image[c.image_type] = type
+    image[c.time] = datetime.today().strftime(c.time_format)
     if type != "dir":
         image['path'] = path
         g_log.info("sha1 %s now." % (path))
@@ -511,45 +570,52 @@ def add_image_config(name="", path="", type="", parent=None, deps=()):
 def mount_image(image, outpath=''):
     ret = False
     new_image = {}
-    hash = image['hash']
+    hash = image[c.hash]
     inpath = image['path']
-    imgtype = image[const.image_type]
-    new_image['name'] = image['name']
+    imgtype = image[c.image_type]
+    new_image[c.name] = image[c.name]
     new_image['oldname'] = image['oldname']
-    new_image['parent'] = image['parent']
-    new_image['hash'] = hash
-    new_image['deps'] = image['deps']
+    new_image[c.parent] = image[c.parent]
+    new_image[c.hash] = hash
+    new_image[c.deps] = image[c.deps]
     new_image['inpath'] = inpath
-    new_image['outpath'] = outpath
-    new_image[const.image_type] = imgtype
-    new_image['used'] = 1
-    new_image['time'] = datetime.today().strftime("%Y-%m-%d %X")
+    new_image[c.opath] = outpath
+    new_image[c.by] = []
+    new_image[c.used] = []
+    new_image[c.image_type] = imgtype
+    new_image[c.time] = datetime.today().strftime(c.time_format)
     global g_images_dir
-    if imgtype in ['sfs', 'iso', 'ext3', 'ext4']:
+    if not os.path.exists(outpath):
+        if not run_cmd_root("mkdir -p %s" % outpath):
+            return False
+    if imgtype in [c.sfs, 'iso', 'ext3', 'ext4']:
         cmd = "mount %s %s" % (inpath, outpath)
         if run_cmd_root(cmd):
-            # new_image[const.cmd] = cmd
-            new_image[const.mount_type] = const.mounted
+            # new_image[c.cmd] = cmd
+            new_image[c.mount_type] = c.mounted
             g_images_dir[hash] = new_image
             save_mounted_config(mounted=True)
             ret = True
     elif imgtype in ['tar', 'tar.gz', 'tgz', 'tar.bz2']:
         cmd = "tar xvf %s -C %s" % (inpath, outpath)
         if run_cmd_root(cmd):
-            # new_image[const.cmd] = cmd
-            new_image[const.mount_type] = const.extract
+            # new_image[c.cmd] = cmd
+            new_image[c.mount_type] = c.extract
             g_images_dir[hash] = new_image
             save_mounted_config(extract=True)
             ret = True
-    elif imgtype in ['dir']:
+    elif imgtype in [c.dir]:
         paths = []
         while True:
-            name = image['parent']
+            name = image[c.parent]
             if name == None:
                 break
             image = get_backup(name)
-            hash = image['hash']
-            paths.append(g_images_dir[hash]['outpath'])
+            hash = image[c.hash]
+            m_image = g_images_dir[hash]
+            m_image[c.by].append(new_image[c.hash])
+            new_image[c.used].append(hash)
+            paths.append(m_image[c.opath])
         upperdir = os.path.join(inpath, "upper")
         workdir = os.path.join(inpath, "work")
         if not os.path.exists(upperdir):
@@ -559,9 +625,9 @@ def mount_image(image, outpath=''):
         mount_opt = "lowerdir=%s,upperdir=%s,workdir=%s" % (':'.join(paths), upperdir, workdir)
         cmd = "mount -t overlay -o %s overlay %s" % (mount_opt, outpath)
         if run_cmd_root(cmd):
-            new_image[const.mount_type] = const.mounted
-            # new_image[const.cmd] = cmd
-            g_images_dir[new_image['hash']] = new_image
+            new_image[c.mount_type] = c.mounted
+            # new_image[c.cmd] = cmd
+            g_images_dir[new_image[c.hash]] = new_image
             save_mounted_config(mounted=True)
             ret = True
     return ret
@@ -573,12 +639,12 @@ def remove_backup(backup_name):
         return False
     image = g_image_names[backup_name]
     image['oldname'] = backup_name
-    image['name'] = ''
+    image[c.name] = ''
     del g_image_names[backup_name]
     save_json_config(get_config(env.image_config), g_images)
 
 
-def mksquashfs(dir, path, exclude=(), comp='lz4', other=()):
+def mksquashfs(dir, path, exclude=(), comp='lzo', other=()):
     if os.path.exists(path):
         g_log.error("mksquashfs: %s is exist." % (path))
         return False
@@ -588,28 +654,66 @@ def mksquashfs(dir, path, exclude=(), comp='lz4', other=()):
     return run_cmd_root(cmd)
 
 
-def create_backup_cmd(bakdir):
+def create_backup_cmd(arg):
     deps = ()
     temps = get_config(env.backup_deps, None)
     if temps != None:
         deps = tuple(temps.split(','))
     parent = get_config(env.backup_parent, None)
-    name = get_config(env.backup_name, os.path.basename(bakdir))
-    create_backup(name, bakdir, parent, deps)
+    if os.path.exists(arg):
+        name = get_config(env.backup_name, os.path.basename(arg))
+        create_backup(name, arg, parent, deps)
+    else:
+        image = get_backup(arg)
+        if image is not None:
+            name = get_config(env.backup_name, image[c.name])
+            if image[c.image_type] != c.sfs:
+                g_log.error(str.format("can't create backup on {0}, {0} must be type sfs", name))
+                return
+            if parent is not None:
+                g_log.warn("ignore --backup-parent param")
+            create_backup(name, parent=image[c.hash])
+
+
+def get_image_content_path(image):
+    return os.path.join(image['path'], 'upper')
+
+
+def compact_backup(name):
+    image = get_backup(name)
+    if image[c.image_type] != c.dir:
+        g_log.error("image must be a directory type")
+        return
+    exclude = get_config(env.exclude, ())
+    backup_name = get_config(env.backup_name, image[c.name])
+    if has_backup(backup_name):
+        g_log.warn("%s is exist" % backup_name)
+        remove_backup(backup_name)
+    backup_file = get_newbackup_path(backup_name)
+    if not mksquashfs(get_image_content_path(image), backup_file, exclude):
+        g_log.error("mksquashfs %s error." % backup_file)
+        return False
+    add_image_config(backup_name, backup_file, c.sfs, parent=image[c.parent], deps=image[c.deps])
+
+
+def get_newbackup_path(name):
+    tmstr = datetime.today().strftime("%y%m%d_%H%M%S")
+    backup_rootdir = get_config(env.backup_rootdir)
+    if not os.path.exists(backup_rootdir):
+        run_cmd_root("mkdir -p %s" % backup_rootdir)
+    return os.path.join(backup_rootdir, "%s_%s.sfs" % (name, tmstr))
 
 
 def create_backup(name='', dir="", parent=None, deps=()):
-    tmstr = datetime.today().strftime("%y%m%d_%H%M%S")
-    type = 'sfs'
+    type = c.sfs
     if parent == None:
-        backup_rootdir = get_config(env.backup_rootdir)
         if has_backup(name):
             g_log.info("backup %s is exist." % (name))
         dir = dir.rstrip('/')
         if not os.path.exists(dir):
             g_log.error(dir + " not exist.")
             sys.exit(1)
-        backup_file = os.path.join(backup_rootdir, "%s_%s.sfs" % (name, tmstr))
+        backup_file = get_newbackup_path(name)
         if os.path.exists(backup_file):
             g_log.error("%s is exist, can't create backup." % (backup_file))
             return False
@@ -618,14 +722,14 @@ def create_backup(name='', dir="", parent=None, deps=()):
             g_log.error("mksquashfs %s error." % (backup_file))
             return False
     else:
-        type = 'dir'
+        type = c.dir
         backup_file = dir
         pimage = get_backup(parent)
-        if pimage[const.image_type] == 'dir':
+        if pimage[c.image_type] == c.dir:
             g_log.error("parent image can't be directory")
             return False
         if name is '':
-            name = pimage['name']
+            name = pimage[c.name]
     if has_backup(name):
         remove_backup(name)
     add_image_config(name, backup_file, type, parent=parent, deps=deps)
@@ -640,8 +744,8 @@ def get_parent_list(name):
     paths = []
     while True:
         image = get_backup(name)
-        paths.append(image['hash'])
-        name = image['parent']
+        paths.append(image[c.hash])
+        name = image[c.parent]
         if name == None:
             break
     # paths.reverse()
@@ -649,21 +753,20 @@ def get_parent_list(name):
 
 
 def mount_backup(name, mode='rw'):
-    g_log.info("mount backup %s:%s" % (name, mode))
     image = get_backup(name)
-    hash = image['hash']
     if image is None:
         g_log.warning("backup: %s is not exist." % (name))
         return False
     if not check_backup(name):
         return False
+    hash = image[c.hash]
     if has_mounted(hash):
-        g_images_dir[hash]['used'] += 1
         g_log.warning("backup: %s is mounted." % (name))
         return True
+    g_log.info("mount backup %s:%s" % (name, mode))
     ret = True
     mounted_deps = []
-    for n in image['deps']:
+    for n in image[c.deps]:
         if mount_backup(n):
             mounted_deps.append(n)
         else:
@@ -673,7 +776,7 @@ def mount_backup(name, mode='rw'):
             break
 
     if ret:
-        parent = image['parent']
+        parent = image[c.parent]
         if parent != None:
             ret = mount_backup(parent, mode='ro')
 
@@ -684,40 +787,46 @@ def mount_backup(name, mode='rw'):
                 run_cmd_root("mkdir -p %s" % tempdir)
             ret = mount_image(image, tempdir)
         if mode == 'rw':
-            workdir = os.path.join(get_config(env.backup_workdir), image['name'])
-            if not os.path.exists(workdir):
-                if not run_cmd_root("mkdir -p %s" % workdir):
-                    return False
-            if image[const.image_type] != 'dir':
+            if image[c.image_type] != c.dir:
                 if not create_backup(parent=hash):
                     return False
-                mount_backup(name, mode)
-            else:
+                workdir = os.path.join(get_config(env.backup_workdir), image[c.hash])
                 ret = mount_image(image, workdir)
+                if not ret:
+                    return ret
+                image = get_backup(name)
+            workdir = os.path.join(get_config(env.backup_workdir), image[c.name])
+            ret = mount_image(image, workdir)
 
     return ret
 
 
 def umount_backup(name):
-    hash = get_backup(name)['hash']
+    hash = get_backup(name)[c.hash]
     if not has_mounted(hash):
         g_log.warning("backup: %s is not mounted." % (name))
         return False
     ret = False
-    image = g_images_dir[hash]
-    parent = image['parent']
-    for n in image['deps'][::-1]:
+    m_image = g_images_dir[hash]
+    parent = m_image[c.parent]
+    for n in m_image[c.deps][::-1]:
         umount_backup(n)
-        image['deps'].pop(0)
-    if len(image['deps']) == 0:
-        image['used'] -= 1
-        if image['used'] == 0:
-            path = image['outpath']
-            if run_cmd_root("umount %s" % (path)):
-                run_cmd_root("rmdir %s" % (path))
-                del g_images_dir[hash]
-                ret = True
+        m_image[c.deps].pop(0)
+    if len(m_image[c.deps]) != 0:
+        g_log.error("deps is not none, can't umount %s " % name)
+        return ret
+    if len(m_image[c.by]) != 0:
+        by_names = ','.join([pretty_name(n) for n in m_image[c.by]])
+        g_log.error("%s used by %s, can't umount" % (pretty_name(name), by_names))
+        return ret
+    path = m_image[c.opath]
+    if run_cmd_root("umount %s" % (path)):
+        run_cmd_root("rmdir %s" % (path))
+        del g_images_dir[hash]
+        for m_hash in m_image[c.used]:
+            g_images_dir[m_hash][c.by].remove(hash)
         save_mounted_config(mounted=True)
+        ret = True
     if parent != None:
         ret = umount_backup(parent)
     return ret
@@ -725,11 +834,11 @@ def umount_backup(name):
 
 def run_option(o, p, t="config"):
     opt = g_config['opt'][o]
-    if opt[const.image_type] != t:
+    if opt[c.image_type] != t:
         return
     if p is '?':
         print(o + ' help:')
-        show_map(opt['values'], "  ")
+        show_map_1level(opt['values'], "  ")
         sys.exit(0)
     func = opt['func']
     if opt['argc'] > 0:
@@ -755,7 +864,7 @@ def default_env():
 
     set_config(env.backup_tempdir, "/media/backup.temp")
     # set_config(env.backup_rootdir, "/media/backup")
-    set_config(env.backup_rootdir, "/tmp")
+    set_config(env.backup_rootdir, "/tmp/zmbak")
     # set_config(env.backup_unionfsdir, "/media/backup/unionfs")
     set_config(env.backup_unionfsdir, "/media/backup.unionfs")
     # set_config(env.backup_workdir, "/media/bak/")
@@ -777,7 +886,7 @@ def which(file):
 
 
 def run_cmd(cmd):
-    g_log.info(cmd)
+    g_log.info('cmd: ' + cmd)
     p = subprocess.Popen(cmd, bufsize=0, stdout=sys.stdout, stderr=sys.stderr, shell=True)
     p.wait()
     if p.returncode != 0:
@@ -794,7 +903,7 @@ def run_cmd_root(cmd):
         elif which('su'):
             ret = run_cmd('su -c ' + cmd)
         else:
-            print("can't find sudo or su, you must use root.")
+            g_log.error("can't find sudo or su, you must use root.")
     else:
         ret = run_cmd(cmd)
     return ret
@@ -876,7 +985,7 @@ def usage():
             key = lp
         if key is not "":
             map_help[key] = opt['help']
-    show_map(map_help, "  ")
+    show_map_1level(map_help, "  ")
     print("")
     print("Exit status:")
     print(" 0  if OK,")
