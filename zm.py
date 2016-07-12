@@ -62,6 +62,8 @@ c.dir = 'dir'
 c.parent = 'parent'
 c.hash = 'hash'
 c.deps = 'deps'
+c.size = 'size'
+c.path = 'path'
 c.by = 'by'
 c.opath = 'outpath'
 c.time = 'time'
@@ -326,7 +328,7 @@ def show_image(name, level=0):
         show_image(parent, level=(level + 1))
 
 
-def show_images():
+def show_images_old():
     all_show = {}
     ft = {c.name: 0, c.hash: 0, c.deps: 1, 'path': 0, 'size': 0, c.time: 0}
     for k, v in g_image_names.items():
@@ -351,6 +353,44 @@ def show_images():
     for k in sorted(all_show.keys()):
         v = all_show[k]
         print(format_str % tuple(v[s] for s in show_order))
+
+def show_images():
+    all_show = {}
+    ft = {
+        c.name: [0, '%%-%ds'],
+        c.hash: [0, '%%-%ds'],
+        c.deps: [1, '%%%ds'],
+        c.time: [0, '%%%ds'],
+        c.size: [0, '%%%ds'],
+        c.path: [0, '%%-%ds'],
+        'tm': [0, '%%%ds'],
+    }
+    for k, v in g_image_names.items():
+        show = {
+            c.name: k,
+            c.hash: v[c.hash],
+            c.time: ' ' + pretty_date(v[c.time]) + ' ',
+            c.path: v[c.path],
+            'tm': v[c.time],
+        }
+        deps_str = ','.join(v[c.deps])
+        show[c.deps] = deps_str if deps_str != '' else '<None>'
+        if v[c.image_type] == c.dir:
+            size = get_dirsize(v['path'])
+        else:
+            size = v['size']
+        show['size'] = humanize_filesize(size)
+
+        all_show[k] = show
+        for n in ft.keys():
+            ft[n][0] = max(len(show[n]), ft[n][0])
+
+    show_order = [c.name, c.hash, c.deps, c.time, c.size, c.path]
+    format_str = ' '.join([ft[s][1] for s in show_order]) % tuple([ft[s][0] for s in show_order])
+
+    for (k, v) in sorted(all_show.items(), key=lambda d: time.strptime(d[1]['tm'], c.time_format), reverse=True):
+        print(format_str % tuple(v[s] for s in show_order))
+
 
 
 def show_old_images():
