@@ -50,7 +50,7 @@ class Const(object):
 
 c = Const()
 c.image_type = 'type'
-c.mount_type = 'mount_type'
+c.mount_mode = 'mount_mode'
 c.mounted = 'mounted'
 c.extract = 'extract'
 c.cmd = 'command'
@@ -58,6 +58,7 @@ c.used = 'used'
 c.name = 'name'
 c.time_format = "%Y-%m-%d %X %f"
 c.sfs = 'sfs'
+c.iso = 'iso'
 c.dir = 'dir'
 c.parent = 'parent'
 c.hash = 'hash'
@@ -66,6 +67,7 @@ c.size = 'size'
 c.path = 'path'
 c.by = 'by'
 c.opath = 'outpath'
+c.status = 'status'
 c.time = 'time'
 
 env = Enum([
@@ -164,10 +166,10 @@ def init_mounted_config():
     if os.path.exists(extract_path):
         extract_images = read_json_config(extract_path)
     for k, v in mounted_images.items():
-        v[c.mount_type] = c.mounted
+        v[c.status] = c.mounted
         g_images_dir[k] = v
     for k, v in extract_images.items():
-        v[c.mount_type] = c.extract
+        v[c.status] = c.extract
         g_images_dir[k] = v
 
 
@@ -175,9 +177,9 @@ def save_mounted_config(mounted=False, extract=False):
     mounted_images = {}
     extract_images = {}
     for k, v in g_images_dir.items():
-        if mounted and v[c.mount_type] == c.mounted:
+        if mounted and v[c.status] == c.mounted:
             mounted_images[k] = v
-        elif extract and v[c.mount_type] == c.extract:
+        elif extract and v[c.status] == c.extract:
             extract_images[k] = v
     if mounted:
         mounted_path = get_config(env.mounted_config)
@@ -388,7 +390,7 @@ def show_images():
     show_order = [c.name, c.hash, c.deps, c.time, c.size, c.path]
     format_str = ' '.join([ft[s][1] for s in show_order]) % tuple([ft[s][0] for s in show_order])
 
-    for (k, v) in sorted(all_show.items(), key=lambda d: time.strptime(d[1]['tm'], c.time_format), reverse=True):
+    for (k, v) in sorted(all_show.items(), key=lambda d: d[1]['tm'], reverse=True):
         print(format_str % tuple(v[s] for s in show_order))
 
 
@@ -444,7 +446,7 @@ def show_mounted():
     show_order = [c.name, c.opath, c.by, c.used, c.time]
     format_str = ' '.join([ft[s][1] for s in show_order]) % tuple([ft[s][0] for s in show_order])
 
-    for (k, v) in sorted(all_show.items(), key=lambda d: time.strptime(d[1]['tm'], c.time_format), reverse=True):
+    for (k, v) in sorted(all_show.items(), key=lambda d: d[1]['tm'], reverse=True):
         print(format_str % tuple(v[s] for s in show_order))
 
 
@@ -559,8 +561,12 @@ def backup_info(name):
     print(get_parent_list(name))
 
 
-def has_mounted(hash):
-    return hash in g_images_dir.keys()
+def has_mounted(hash, mode=None):
+    if hash not in g_images_dir.keys():
+        return False
+    if mode is None:
+        return True
+    return mode == g_images_dir[hash][c.mount_mode]
 
 
 def add_image_config(name="", path="", type="", parent=None, deps=()):
@@ -609,8 +615,11 @@ def add_image_config(name="", path="", type="", parent=None, deps=()):
 
 def mount_image(image, outpath=''):
     ret = False
-    new_image = {}
     hash = image[c.hash]
+    if has_mounted(hash):
+        g_log.warning("backup: %s is mounted." % (name))
+        return False
+    new_image = {}
     inpath = image['path']
     imgtype = image[c.image_type]
     new_image[c.name] = image[c.name]
@@ -624,15 +633,20 @@ def mount_image(image, outpath=''):
     new_image[c.used] = []
     new_image[c.image_type] = imgtype
     new_image[c.time] = datetime.today().strftime(c.time_format)
+    new_image[c.mount_mode] = ""
     global g_images_dir
     if not os.path.exists(outpath):
         if not run_cmd_root("mkdir -p %s" % outpath):
             return False
-    if imgtype in [c.sfs, 'iso', 'ext3', 'ext4']:
+    if imgtype in [c.sfs, c.iso, 'ext3', 'ext4']:
         cmd = "mount %s %s" % (inpath, outpath)
         if run_cmd_root(cmd):
             # new_image[c.cmd] = cmd
-            new_image[c.mount_type] = c.mounted
+            new_image[c.status] = c.mounted
+            if imgtype in [c.sfs, c.iso]:
+                new_image[c.mount_mode] = "ro"
+            else:
+                new_image[c.mount_mode] = "rw"
             g_images_dir[hash] = new_image
             save_mounted_config(mounted=True)
             ret = True
@@ -640,7 +654,7 @@ def mount_image(image, outpath=''):
         cmd = "tar xvf %s -C %s" % (inpath, outpath)
         if run_cmd_root(cmd):
             # new_image[c.cmd] = cmd
-            new_image[c.mount_type] = c.extract
+            new_image[c.status] = c.extract
             g_images_dir[hash] = new_image
             save_mounted_config(extract=True)
             ret = True
@@ -665,8 +679,9 @@ def mount_image(image, outpath=''):
         mount_opt = "lowerdir=%s,upperdir=%s,workdir=%s" % (':'.join(paths), upperdir, workdir)
         cmd = "mount -t overlay -o %s overlay %s" % (mount_opt, outpath)
         if run_cmd_root(cmd):
-            new_image[c.mount_type] = c.mounted
+            new_image[c.status] = c.mounted
             # new_image[c.cmd] = cmd
+            new_image[c.mount_mode] = "rw"
             g_images_dir[new_image[c.hash]] = new_image
             save_mounted_config(mounted=True)
             ret = True
@@ -800,7 +815,7 @@ def mount_backup(name, mode='rw'):
     if not check_backup(name):
         return False
     hash = image[c.hash]
-    if has_mounted(hash):
+    if has_mounted(hash, mode):
         g_log.warning("backup: %s is mounted." % (name))
         return True
     g_log.info("mount backup %s:%s" % (name, mode))
@@ -830,10 +845,7 @@ def mount_backup(name, mode='rw'):
             if image[c.image_type] != c.dir:
                 if not create_backup(parent=hash):
                     return False
-                workdir = os.path.join(get_config(env.backup_workdir), image[c.hash])
-                ret = mount_image(image, workdir)
-                if not ret:
-                    return ret
+                mount_backup(hash, 'ro')
                 image = get_backup(name)
             workdir = os.path.join(get_config(env.backup_workdir), image[c.name])
             ret = mount_image(image, workdir)
@@ -855,9 +867,10 @@ def umount_backup(name):
     if len(m_image[c.deps]) != 0:
         g_log.error("deps is not none, can't umount %s " % name)
         return ret
+    print(m_image[c.by])
     if len(m_image[c.by]) != 0:
         by_names = ','.join([pretty_name(n) for n in m_image[c.by]])
-        g_log.error("%s used by %s, can't umount" % (pretty_name(name), by_names))
+        g_log.info("%s used by %s" % (pretty_name(name), by_names))
         return ret
     path = m_image[c.opath]
     if run_cmd_root("umount %s" % (path)):
