@@ -71,7 +71,8 @@ log_info()
 
 backup_file()
 {
-    local time_dir=$(date +%y%m%d_%H%M)
+    local time_dir=$(date +%y%m%d)
+    # local time_dir=$(date +%y%m%d_%H%M)
     while [ $# -gt 0 ]; do
         bak_file=$1
         shift
@@ -103,12 +104,23 @@ download_file()
     md5=$3
     DL="wget -c"
 
-    if which axel;then
-        if [ ! -e "$2" ];then
-            axel $1 -o $2
+    if [ -e "$dst" -a -n "$md5" ];then
+        echo "$md5 $dst" | md5sum -c 
+        if [ $? = 0 ];then
+            return
+        fi
+    fi
+
+    if false;then
+        if which axel;then
+            if [ ! -e "$2" ];then
+                axel $1 -o $2
+            fi
+        else
+            wget -c $1 -O $2
         fi
     else
-        wget -c $1 -O $2
+        wget -c -O $2 $1 
     fi
 
     if [ -n "$md5" ];then
@@ -586,7 +598,7 @@ install_grub()
         mount_device $rootpart $root
     fi
     install_grub_on_dir $root
-    $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
+    # $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
     $SUDO grub-install $disk --no-floppy --root-directory=$root --modules="${modules[*]}"
     if [ -b "$rootpart" ];then
         umount_device $root
@@ -1198,7 +1210,10 @@ gen_root_sfs()
     var/cache/hald/fdi-cache 
     var/cache/apt/archives/.* 
     work/.* 
-    home/.*/.*'
+    home/.*/.*
+    var/log/journal
+    dev/.*
+    '
 }
 
 gen_home_sfs()
@@ -1719,13 +1734,13 @@ make_debian_base_system()
 
 make_archlinux_base_system()
 {
-    md5sum_file=$dl_dir/md5sums.txt
-    download_file $src_url/archlinux/iso/latest/md5sums.txt $md5sum_file
-    bootstrap_file=$(cat $md5sum_file | grep $zm_arch | awk '{print $2}')
-    bootstrap_md5=$(cat $md5sum_file | grep $zm_arch | awk '{print $1}')
-    download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_md5
     root_dir=$build_dir/root.$zm_arch
     if [ ! -d "$root_dir" ];then
+        md5sum_file=$dl_dir/md5sums.txt
+        download_file $src_url/archlinux/iso/latest/md5sums.txt $md5sum_file
+        bootstrap_file=$(cat $md5sum_file | grep $zm_arch | awk '{print $2}')
+        bootstrap_md5=$(cat $md5sum_file | grep $zm_arch | awk '{print $1}')
+        download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_md5
         tar xvf /work/cache/pacman/pkg/$bootstrap_file -C $build_dir/
     fi
 
@@ -1735,6 +1750,16 @@ make_archlinux_base_system()
         -e 's#Server = file.*$#Server = file:///work/cache/pacman/repo#g' \
         -e 's@^#CacheDir.*/var/cache/pacman/pkg.*$@CacheDir = /work/cache/pacman/pkg/@g' \
         $root_dir/etc/pacman.conf
+    # -e "s/#\[multilib\]/\[multilib\]/g" -e "/\[multilib\]/{n;s/#//g}" 
+
+    if false;then
+        if ! grep "archlinuxfr" $root_dir//etc/pacman.conf > /dev/null;then
+            echo "" >> $root_dir//etc/pacman.conf
+            echo "[archlinuxfr]" >> $root_dir//etc/pacman.conf
+            echo "SigLevel = Optional TrustAll" >> $root_dir//etc/pacman.conf
+            echo "Server = http://repo.archlinux.fr/\$arch" >> $root_dir//etc/pacman.conf
+        fi
+    fi
 }
 
 make_system()
@@ -1774,6 +1799,7 @@ make_system()
     zm_options+=" --zm-dir $zm_dir"
     zm_options+=" --os-name $os_name"
     zm_options+=" --arch $zm_arch"
+    zm_options+=" --zm-user-passwd \"$zm_user_passwd\""
     zm_options+=" auto_install"
     if $zm_debug;then
         zm_options+=" --debug"
@@ -1997,24 +2023,26 @@ install_debian_softs()
 
 install_archlinux_softs()
 {
+    add_soft base-devel
     add_soft autoconf automake binutils
     add_soft bison fakeroot flex libtool groff
     add_soft make m4 patch pkg-config texinfo
-    add_soft gcc-multilib gcc-libs-multilib
+    # add_soft gcc-multilib gcc-libs-multilib
+    # add_soft multilib-devel
     add_soft systemd-sysvcompat 
     add_soft openssh wget dosfstools 
     add_soft linux man
     add_soft squashfs-tools 
     add_soft lvm2
     add_soft net-tools
-    # add_soft 
+    add_soft yaourt
     # add_soft 
     # add_soft 
     zm_user_command zm_add_softs
     $SUDO pacman -Suy --noconfirm
     $SUDO pacman -S --needed --noconfirm $(cat $soft_list_file)
 
-    if [ -n "$archlinux_aur_softs" ];then
+    if [ -n "$archlinux_aur_softs" -a "$(id -u)" != "0" ];then
         repo_dir=/work/cache/pacman/repo
         $SUDO touch ${repo_dir}/custom.db
         yaourt -Syu
@@ -2104,7 +2132,7 @@ zm_setup_user()
         $SUDO groupadd -g $userid $zm_user 
         $SUDO useradd -m -s /bin/bash -u $userid -g $userid $zm_user
         # useradd -m -s /bin/zsh -u $userid -g $userid $zm_user
-        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers uucp
+        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers uucp docker disk
         # echo "
         # $zm_user    ALL=NOPASSWD: /bin/mount
         # $zm_user    ALL=NOPASSWD: /bin/umount
@@ -2631,7 +2659,8 @@ zm_config()
     if [ -z "$zm_arch" ];then
         case "$os_name" in
             debian.*)
-                zm_arch=$(dpkg --print-architecture)
+                # zm_arch=$(dpkg --print-architecture)
+                zm_arch="amd64"
                 ;;
             archlinux)
                 zm_arch="x86_64"
@@ -2879,8 +2908,8 @@ zm_init()
     keep_build_dir="no"
 
     # no multimedia
-    # src_url=http://mirrors.163.com
-    src_url=http://mirrors.aliyun.com
+    src_url=http://mirrors.163.com
+    # src_url=http://mirrors.aliyun.com
     # src_url=http://mirrors.sohu.com
 
     # have multimedia

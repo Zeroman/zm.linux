@@ -135,6 +135,18 @@ goto_shell()
     esac
 }
 
+check_device()
+{
+    case "$os_name" in
+        debian)
+            checkfs $*
+            ;;
+        archlinux)
+            fsck_device $1
+            ;;
+    esac
+}
+
 get_filesize_mb()
 {
     test -e "$1" || err_exit "$1 is no exist!"
@@ -180,7 +192,7 @@ mount_storage()
     mount_point=$2
     if [ -b "$mount_src" ];then
         print_msg "Check filesystem on $mount_src ..."
-        checkfs $mount_src $mount_point
+        check_device $mount_src $mount_point
     fi
     print_msg "Mounting $mount_src on $mount_point ..."
     mkdir -p -m 0755 $mount_point
