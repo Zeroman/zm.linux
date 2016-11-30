@@ -357,8 +357,10 @@ def show_images_old():
         v = all_show[k]
         print(format_str % tuple(v[s] for s in show_order))
 
+
 def show_old_images():
     show_images('old')
+
 
 def show_images(view='live'):
     all_show = {}
@@ -403,8 +405,6 @@ def show_images(view='live'):
 
     for (k, v) in sorted(all_show.items(), key=lambda d: d[1]['tm'], reverse=True):
         print(format_str % tuple(v[s] for s in show_order))
-
-
 
 
 def show_mount(name, level=0):
@@ -538,6 +538,9 @@ def add_all_options():
     exec_opt(lp="--check-backup", func=check_backup, argc=1, help="check backup")
     exec_opt(lp="--backup-info", func=backup_info, argc=1, help="check backup")
 
+    exec_opt(lp="--import-images", func=import_images, argc=1, help="import backup from dir")
+    exec_opt(lp="--import-image", func=import_image, argc=1, help="import backup from image path")
+
 
 def has_backup(name):
     return True if get_backup(name) != None else False
@@ -545,6 +548,8 @@ def has_backup(name):
 
 def get_backup(name):
     image = None
+    if name is None:
+        return image
     if name in g_image_names.keys():
         image = g_image_names[name]
     if image == None and name in g_images.keys():
@@ -569,6 +574,36 @@ def check_backup(name):
 
 def backup_info(name):
     print(get_parent_list(name))
+
+
+def import_images(dir):
+    if not os.path.isdir(dir):
+        g_log.error("%s is not dir" % dir)
+        return False
+    set_config(env.backup_parent, None)
+    for name in os.listdir(dir):
+        if name[-3:] not in ["sfs"]:
+            continue
+        import_image(os.path.join(dir, name))
+
+
+def import_image(path):
+    name = get_config(env.backup_name, None)
+    if name is None:
+        name = os.path.basename(path).split('.')[0]
+    parent = get_config(env.backup_parent, None)
+    if parent is None and has_backup(name):
+        g_log.error("%s is exist, exit now" % name)
+        return False
+    if parent is not None:
+        pimage = get_backup(parent)
+    if os.path.isfile(path):
+        add_image_config(name, path, c.sfs, parent=parent)
+    elif os.path.isdir(path):
+        if pimage is None:
+            g_log.error("parent is None, %s" % path)
+            return False
+        add_image_config(name, path, c.dir, parent=pimage[c.hash])
 
 
 def has_mounted(hash, mode=None):
@@ -907,10 +942,10 @@ def run_option(o, p, t="config"):
     opt = g_config['opt'][o]
     if opt[c.image_type] != t:
         return
-    #  print("%s = %s" % (o, p))
+    # print("%s = %s" % (o, p))
     if p is '?':
         print(o + ' help:')
-        print("%s" %(opt['help']))
+        print("%s" % (opt['help']))
         show_map_1level(opt['values'], "  ")
         sys.exit(0)
     func = opt['func']
@@ -935,17 +970,17 @@ def default_env():
     set_config(env.debug, False)
     set_config(env.confirm, True)
 
-    set_config(env.backup_tempdir, "/media/backup.temp")
-    # set_config(env.backup_rootdir, "/media/backup")
+    set_config(env.backup_tempdir, "/run/zm/backup.temp")
+    # set_config(env.backup_rootdir, "/run/zm/backup")
     set_config(env.backup_rootdir, "/tmp/zmbak")
-    # set_config(env.backup_unionfsdir, "/media/backup/unionfs")
-    set_config(env.backup_unionfsdir, "/media/backup.unionfs")
-    # set_config(env.backup_workdir, "/media/bak/")
-    set_config(env.backup_workdir, "/media/backup.work")
+    # set_config(env.backup_unionfsdir, "/run/zm/backup/unionfs")
+    set_config(env.backup_unionfsdir, "/run/zm/backup.unionfs")
+    # set_config(env.backup_workdir, "/run/zm/bak/")
+    set_config(env.backup_workdir, "/run/zm/backup.work")
 
-    # set_config(env.image_config, "/media/backup/image.json")
+    # set_config(env.image_config, "/run/zm/backup/image.json")
     # set_config(env.mounted_config, "/tmp/.mounted.json")
-    # set_config(env.extract_config, "/media/backup.temp/extract.json")
+    # set_config(env.extract_config, "/run/zm/backup.temp/extract.json")
     set_config(env.image_config, "image.json")
     set_config(env.mounted_config, "mounted.json")
     set_config(env.extract_config, "extract.json")

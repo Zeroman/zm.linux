@@ -1983,7 +1983,7 @@ install_debian_soft()
 install_archlinux_soft()
 {
     # pacman -Suy --noconfirm
-    $SUDO pacman -S --needed --noconfirm $@
+    $SUDO pacman -S --force --needed --noconfirm $@
 }
 
 install_soft()
@@ -2039,8 +2039,8 @@ install_archlinux_softs()
     # add_soft 
     # add_soft 
     zm_user_command zm_add_softs
-    $SUDO pacman -Suy --noconfirm
-    $SUDO pacman -S --needed --noconfirm $(cat $soft_list_file)
+    $SUDO pacman -Suy --force --noconfirm
+    $SUDO pacman -S --force --needed --noconfirm $(cat $soft_list_file)
 
     if [ -n "$archlinux_aur_softs" -a "$(id -u)" != "0" ];then
         repo_dir=/work/cache/pacman/repo
@@ -2398,7 +2398,7 @@ zm_backup_dir()
         $SUDO chattr -i $all_sfs
     fi
     gen_common_sfs $bak_path $bak_sfs
-    $SUDO chattr +i $bak_sfs
+    # $SUDO chattr +i $bak_sfs
 }
 
 
@@ -2911,6 +2911,7 @@ zm_init()
     src_url=http://mirrors.163.com
     # src_url=http://mirrors.aliyun.com
     # src_url=http://mirrors.sohu.com
+    # src_url=http://mirror.bit.edu.cn
 
     # have multimedia
     # src_url=http://free.nchc.org.tw
