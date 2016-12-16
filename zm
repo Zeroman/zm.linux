@@ -1172,19 +1172,24 @@ gen_common_sfs()
 {
     local srcdir=$1
     local dstsfs=$2
-    shift 2
+    # shift 2
 
     check_binary mksquashfs
 
     temp_exclude_file=$(mktemp)
     echo "lost+found" >> $temp_exclude_file
     echo "$unionfs_clean_file" >> $temp_exclude_file
-    echo "$@" | xargs -n1 >> $temp_exclude_file
+    # echo "$@" | xargs -n1 >> $temp_exclude_file
 
     if $zm_debug;then
         cat $temp_exclude_file
     fi
 
+    if [ -e ${srcdir}/.zmignore ];then
+        cat ${srcdir}/.zmignore >> $temp_exclude_file
+    fi
+
+    $SUDO rm -fv ${dstsfs}.new
     $SUDO mksquashfs ${srcdir} ${dstsfs}.new -comp lz4 -regex -ef $temp_exclude_file
 
     backup_file ${dstsfs} ${dstsfs}.[0-9]
@@ -1196,37 +1201,48 @@ gen_common_sfs()
 
 gen_root_sfs()
 {
-    gen_common_sfs $1 $2 \
-        'sys/.* proc/.* run/.* 
-    var/tmp/.* tmp/.* 
-    media/.* mnt/.* dev/disk/.*/.* 
-    etc/mtab etc/fstab 
-    etc/udev/rules.d/70-.*net.* 
-    etc/X11/xorg.conf* 
-    usr/portage/distfiles/.* 
-    etc/hal/fdi/policy/11-x11-vmmouse.fdi 
-    usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
-    usr/bin/vmmouse_detect 
-    var/cache/hald/fdi-cache 
-    var/cache/apt/archives/.* 
-    work/.* 
-    home/.*/.*
-    var/log/journal
-    dev/.*
-    '
+    echo '
+sys/.* 
+proc/.* 
+run/.* 
+var/tmp/.* 
+tmp/.* 
+media/.* 
+mnt/.* 
+dev/.*
+dev/disk/.*/.* 
+etc/mtab 
+etc/fstab 
+etc/udev/rules.d/70-.*net.* 
+etc/X11/xorg.conf* 
+usr/portage/distfiles/.* 
+etc/hal/fdi/policy/11-x11-vmmouse.fdi 
+usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
+usr/bin/vmmouse_detect 
+var/cache/hald/fdi-cache 
+var/cache/apt/archives/.* 
+work/.* 
+home/.*/.*
+var/log/journal
+.zmignore
+    ' | $SUDO tee $1/.zmignore
+    gen_common_sfs $1 $2 
 }
 
 gen_home_sfs()
 {
-    gen_common_sfs $1 $2 \
-        '.*/.xauth*
-    .*/.serverauth
-    .*/Downloads/.*
-    .*/.cache
-    .*/.backup/.*
-    .*/.xsession-errors
-    .*/.kermit.log
-    .*libreoffice.*' 
+    echo '
+.*/.xauth*
+.*/.serverauth
+.*/Downloads/.*
+.*/.cache
+.*/.backup/.*
+.*/.xsession-errors
+.*/.kermit.log
+.*libreoffice.*
+.zmignore
+    ' | $SUDO tee $1/.zmignore
+    gen_common_sfs $1 $2 
 }
 
 update_system()
@@ -1342,26 +1358,28 @@ update_grub_config()
         grubdev=$(mount | grep -w "$sfs_part_mpath" | awk '{print $1}')
     fi
 
+    local zm_name_param=$(cat /proc/cmdline | tr ' ' '\n' | grep zm_name)
     local grubroot="$(mktemp -d)"
     local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
     local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}
     local os_class=${os_name/.*}
-    local base_kernel_params="cgroup_enable=memory swapaccount=1" #for docker
+    local base_kernel_params="cgroup_enable=memory swapaccount=1 $zm_name_param" #for docker
+
 
     mount_device $grubdev $grubroot
     check_dir_exist "$grubroot/$temp_path"
     check_dir_exist "$grubroot/boot/grub/config"
     echo "
-    menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class ${os_class} {
+menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class ${os_class} {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
     set zm_dir=$temp_path
     echo 'Loading $zm_arch kernel...'
-    linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params 
+    linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params
     echo 'Loading $zm_arch initrd...'
     initrd \$zm_dir/${initrd_name}
     savedefault
-    }" > $grubroot/boot/grub/config/default.cfg
+}" > $grubroot/boot/grub/config/default.cfg
 
     local items=""
     check_dir_exist "$grubroot/linux"
@@ -1378,12 +1396,12 @@ update_grub_config()
         for dir in $items
         do
             echo "
-            menuentry '${dir}' --class=submenu --class ${os_class} {
+        menuentry '${dir}' --class=submenu --class ${os_class} {
             set     zm_dir=/linux/${dir}
             linux	\$zm_dir/vmlinuz $base_kernel_params
             initrd	\$zm_dir/initrd.img
             savedefault
-            } " | $SUDO tee -a $linuxcfg > /dev/null
+        } " | $SUDO tee -a $linuxcfg > /dev/null
         done
         echo "}" | $SUDO tee -a $linuxcfg > /dev/null
     fi
@@ -1391,7 +1409,7 @@ update_grub_config()
     for dir in $items
     do
         echo "
-        menuentry '${dir}' --class=submenu --class ${os_class} {
+    menuentry '${dir}' --class=submenu --class ${os_class} {
         set     zm_dir=/linux/${dir}
         linux	\$zm_dir/vmlinuz
         initrd	\$zm_dir/initrd.img
