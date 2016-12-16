@@ -919,17 +919,35 @@ __mount_with_overlay()
     $SUDO mount -t overlay -o $options overlay $mountdir
 }
 
+support_union_fs()
+{
+    if lsmod | grep overlay > /dev/null 2>&1;then
+        echo "overlay"
+        return
+    fi
+
+    if lsmod | grep aufs > /dev/null 2>&1;then
+        echo "aufs"
+        return
+    fi
+
+}
+
 mount_unionfs()
 {
     # sfsname sfsdir sfsmountdir upperdir mountdir
 
-    if modprobe overlay > /dev/null 2>&1;then
-        __mount_with_overlay $@
-    elif modprobe aufs > /dev/null 2>&1;then
-        __mount_with_aufs $@
-    else
-        err "no support union filesystem."
-    fi
+    case $(support_union_fs) in
+        overlay)
+            __mount_with_overlay $@
+            ;;
+        aufs)
+            __mount_with_aufs $@
+            ;;
+        *)
+            err "no support union filesystem."
+            ;;
+    esac
 }
 
 zm_build_deb_checkinstall() 
@@ -1181,16 +1199,18 @@ gen_common_sfs()
     echo "$unionfs_clean_file" >> $temp_exclude_file
     # echo "$@" | xargs -n1 >> $temp_exclude_file
 
-    if $zm_debug;then
-        cat $temp_exclude_file
-    fi
-
     if [ -e ${srcdir}/.zmignore ];then
         cat ${srcdir}/.zmignore >> $temp_exclude_file
     fi
 
+    sed -i -e 's/^[ \t]*//;s/[ \t]*$//' -e '/^$/d' $temp_exclude_file
+
+    if $zm_debug;then
+        cat $temp_exclude_file
+    fi
+
     $SUDO rm -fv ${dstsfs}.new
-    $SUDO mksquashfs ${srcdir} ${dstsfs}.new -comp lz4 -regex -ef $temp_exclude_file
+    $SUDO mksquashfs ${srcdir} ${dstsfs}.new -noappend -comp lz4 -regex -ef $temp_exclude_file
 
     backup_file ${dstsfs} ${dstsfs}.[0-9]
     $SUDO mv ${dstsfs}.new ${dstsfs}
@@ -1202,29 +1222,28 @@ gen_common_sfs()
 gen_root_sfs()
 {
     echo '
-sys/.* 
-proc/.* 
-run/.* 
-var/tmp/.* 
-tmp/.* 
-media/.* 
-mnt/.* 
-dev/.*
-dev/disk/.*/.* 
-etc/mtab 
-etc/fstab 
-etc/udev/rules.d/70-.*net.* 
-etc/X11/xorg.conf* 
-usr/portage/distfiles/.* 
-etc/hal/fdi/policy/11-x11-vmmouse.fdi 
-usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
-usr/bin/vmmouse_detect 
-var/cache/hald/fdi-cache 
-var/cache/apt/archives/.* 
-work/.* 
-home/.*/.*
-var/log/journal
-.zmignore
+    sys/.* 
+    proc/.* 
+    run/.* 
+    var/tmp/.* 
+    tmp/.* 
+    media/.* 
+    mnt/.* 
+    dev/.*
+    dev/disk/.*/.* 
+    etc/mtab 
+    etc/fstab 
+    etc/udev/rules.d/70-.*net.* 
+    etc/X11/xorg.conf* 
+    usr/portage/distfiles/.* 
+    etc/hal/fdi/policy/11-x11-vmmouse.fdi 
+    usr/share/hal/fdi/policy/20thirdparty/11-x11-vmmouse.fdi 
+    usr/bin/vmmouse_detect 
+    var/cache/hald/fdi-cache 
+    var/cache/apt/archives/.* 
+    work/.* 
+    home/.*/.*
+    var/log/journal
     ' | $SUDO tee $1/.zmignore
     gen_common_sfs $1 $2 
 }
@@ -1232,16 +1251,14 @@ var/log/journal
 gen_home_sfs()
 {
     echo '
-.*/.xauth*
-.*/.serverauth
-.*/Downloads/.*
-.*/.cache
-.*/.backup/.*
-.*/.xsession-errors
-.*/.kermit.log
-.*libreoffice.*
-.zmignore
-    ' | $SUDO tee $1/.zmignore
+    .*/.xauth*
+    .*/.serverauth
+    .*/Downloads/.*
+    .*/.cache
+    .*/.backup/.*
+    .*/.xsession-errors
+    .*/.kermit.log
+    .*libreoffice.*' | $SUDO tee $1/.zmignore
     gen_common_sfs $1 $2 
 }
 
@@ -1336,13 +1353,17 @@ __merge_with_aufs()
 
 merge_branch()
 {
-    if modprobe overlay > /dev/null 2>&1;then
-        __merge_with_overlay $@
-    elif modprobe aufs > /dev/null 2>&1;then
-        __merge_with_aufs $@
-    else
-        err "no support union filesystem."
-    fi
+    case $(support_union_fs) in
+        overlay)
+            __merge_with_overlay $@
+            ;;
+        aufs)
+            __merge_with_aufs $@
+            ;;
+        *)
+            err "no support union filesystem."
+            ;;
+    esac
 }
 
 sfs2dir()
@@ -2356,13 +2377,17 @@ get_backup_unionfs_dir()
 {
     local bak_name="$1"
 
-    if modprobe overlay > /dev/null 2>&1;then
-        echo "$backup_mountdir/unionfs/${bak_name}/upper"
-    elif modprobe aufs > /dev/null 2>&1;then
-        echo "$backup_mountdir/unionfs/${bak_name}/aufs"
-    else
-        err "no support union filesystem."
-    fi
+    case $(support_union_fs) in
+        overlay)
+            echo "$backup_mountdir/unionfs/${bak_name}/upper"
+            ;;
+        aufs)
+            echo "$backup_mountdir/unionfs/${bak_name}/aufs"
+            ;;
+        *)
+            err "no support union filesystem."
+            ;;
+    esac
 }
 
 zm_backup_branch()
@@ -2945,13 +2970,16 @@ zm_init()
     code_kernel_now=$(get_linux_kernel_code $KERNEL_VERSION)
     #echo $code_kernel_3_18 $code_kernel_now
 
-    if modprobe overlay > /dev/null 2>&1;then
-        unionfs_root_mpath=$union_mpath/root/upper
-        unionfs_home_mpath=$union_mpath/home/upper
-    elif modprobe aufs > /dev/null 2>&1;then
-        unionfs_root_mpath=$union_mpath/root
-        unionfs_home_mpath=$union_mpath/home
-    fi
+    case $(support_union_fs) in
+        overlay)
+            unionfs_root_mpath=$union_mpath/root/upper
+            unionfs_home_mpath=$union_mpath/home/upper
+            ;;
+        aufs)
+            unionfs_root_mpath=$union_mpath/root
+            unionfs_home_mpath=$union_mpath/home
+            ;;
+    esac
 
 }
 
