@@ -547,7 +547,7 @@ zm_copy_source()
     local _dst_dir=$1
 
     $SUDO install -D $zm_workdir/zm $_dst_dir/zm
-    $SUDO $CP $zm_workdir/{common,user,grub,Makefile,test} $_dst_dir/
+    $SUDO $CP $zm_workdir/{common,user,boot,Makefile,test} $_dst_dir/
 
     # git archive --format=tar.gz --prefix=zm/ HEAD > $1
 }
@@ -560,14 +560,14 @@ install_grub_on_dir()
 
     $SUDO mkdir -p $installdir/boot/grub
     $SUDO $CP /usr/lib/grub/i386-pc $installdir/boot/grub/
-    $SUDO $CP $zm_workdir/grub/* $installdir/boot/grub/
+    $SUDO $CP $zm_workdir/boot/grub/* $installdir/boot/grub/
 }
 
 install_grub()
 {
     local -A items
-    items['disk']="/dev/disk/by-label/sfsroot"
-    items['root']="$sfs_part_mpath"
+    items['disk']="/dev/sda"
+    items['root']=$(mount | grep sfsroot | awk '{print $1}')
     items['modules']="biosdisk,part_msdos,lvm"
 
     OLD_IFS=$IFS
@@ -589,7 +589,7 @@ install_grub()
 
     check_file_exist $disk
     log_info "install grub on $disk"
-    dialog_continue "Install grub on $disk"
+    dialog_continue "Install grub on $disk, root=$root"
 
     local rootpart=""
     if [ -b "$root" ];then
@@ -599,7 +599,7 @@ install_grub()
     fi
     install_grub_on_dir $root
     # $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
-    $SUDO grub-install $disk --no-floppy --root-directory=$root --modules="${modules[*]}"
+    $SUDO grub-install $disk --no-floppy --boot-directory=$root/boot --modules="${modules[*]}"
     if [ -b "$rootpart" ];then
         umount_device $root
     fi
@@ -2078,7 +2078,11 @@ install_archlinux_softs()
     # add_soft 
     # add_soft 
     zm_user_command zm_add_softs
-    $SUDO pacman -Suy --force --noconfirm
+    if [ ! -e /tmp/.pacman.update ];then
+        $SUDO pacman -Suy --force --noconfirm
+        $SUDO pacman -S --force --needed --noconfirm archlinux-keyring
+        touch /tmp/.pacman.update
+    fi
     $SUDO pacman -S --force --needed --noconfirm $(cat $soft_list_file)
 
     if [ -n "$archlinux_aur_softs" -a "$(id -u)" != "0" ];then
@@ -2951,7 +2955,8 @@ zm_init()
     keep_build_dir="no"
 
     # no multimedia
-    src_url=http://mirrors.163.com
+    src_url=http://mirrors.tuna.tsinghua.edu.cn
+    # src_url=http://mirrors.163.com
     # src_url=http://mirrors.aliyun.com
     # src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
