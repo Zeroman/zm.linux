@@ -254,6 +254,9 @@ init_params()
             BOOT_IMAGE=*)
                 zm_kernel=${x#BOOT_IMAGE=}
                 ;;
+            \\*vmlinuz)
+                zm_kernel=${x//\\/\/}
+                ;;
             zm_save=*)
                 zm_save=${x#zm_save=}
                 ;;
@@ -281,7 +284,7 @@ init_params()
     all_mem_size=$(free -g | grep Mem | awk '{print $2}')
 
     if [ -z "$zm_kernel" ];then
-        err_exit "Not find kernel param in cmdline."
+        print_msg "Not find kernel param in cmdline."
     fi
 
     if [ -z "$zm_dir" ];then
