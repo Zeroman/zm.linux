@@ -848,7 +848,8 @@ __mount_with_aufs()
     test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
-        $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+        # $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+        backup_file $upperdir
     fi
 
     local lowerdir=""
@@ -895,7 +896,8 @@ __mount_with_overlay()
     test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
-        $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+        # $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+        backup_file $upperdir
     fi
 
     local lowerdir=""
@@ -2633,7 +2635,8 @@ zm_umount_backup()
         for dir in upper aufs work/work work " ";do
             if [ -d $bak_unionfs_dir/$dir ];then
                 if [ -e "$bak_unionfs_dir/$dir/$unionfs_clean_file" ];then
-                    $SUDO rm -rf $bak_unionfs_dir/$dir/{*,.[!.]*,..?*}
+                    # $SUDO rm -rf $bak_unionfs_dir/$dir/{*,.[!.]*,..?*}
+                    backup_file $bak_unionfs_dir/$dir
                 fi
                 $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/$dir
             fi
