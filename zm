@@ -835,13 +835,13 @@ __mount_with_aufs()
     local sfsname="$1"
     local sfsdir="$2"
     local sfsmountdir=$3
-    local upperdir="$4"
+    local unionfsdir="$4"
     local mountdir="$5"
 
-    test -d "$upperdir" || err "upperdir: $upperdir is not found!"
+    test -d "$unionfsdir" || err "unionfsdir: $unionfsdir is not found!"
     test -d "$mountdir" || err "mountdir: $mountdir is not found!"
 
-    upperdir=$upperdir/aufs
+    upperdir=$unionfsdir/aufs
     $SUDO mkdir -p $upperdir
 
     local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
@@ -849,7 +849,7 @@ __mount_with_aufs()
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
         # $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
-        backup_file $upperdir
+        backup_file $unionfsdir
     fi
 
     local lowerdir=""
@@ -881,14 +881,14 @@ __mount_with_overlay()
     local sfsname="$1"
     local sfsdir="$2"
     local sfsmountdir=$3
-    local upperdir="$4"
+    local unionfsdir="$4"
     local mountdir="$5"
 
-    test -d "$upperdir" || err "upperdir: $upperdir is not found!"
+    test -d "$unionfsdir" || err "unionfsdir: $unionfsdir is not found!"
     test -d "$mountdir" || err "mountdir: $mountdir is not found!"
 
-    local workdir=$upperdir/work
-    upperdir=$upperdir/upper
+    local workdir=$unionfsdir/work
+    upperdir=$unionfsdir/upper
     $SUDO mkdir -p $workdir
     $SUDO mkdir -p $upperdir
 
@@ -897,7 +897,7 @@ __mount_with_overlay()
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
         # $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
-        backup_file $upperdir
+        backup_file $unionfsdir
     fi
 
     local lowerdir=""
@@ -2345,6 +2345,7 @@ zm_mount_backup()
         $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
     fi
     if ! is_mounted $bak_root_dir;then
+
         $SUDO mkdir -m 700 -p $bak_root_dir
         $SUDO mkdir -m 700 -p $bak_unionfs_dir
 
@@ -2631,16 +2632,7 @@ zm_umount_backup()
             rm -vf $work_mountdir/$bak_name
         fi
 
-        local bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
-        for dir in upper aufs work/work work " ";do
-            if [ -d $bak_unionfs_dir/$dir ];then
-                if [ -e "$bak_unionfs_dir/$dir/$unionfs_clean_file" ];then
-                    # $SUDO rm -rf $bak_unionfs_dir/$dir/{*,.[!.]*,..?*}
-                    backup_file $bak_unionfs_dir/$dir
-                fi
-                $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/$dir
-            fi
-        done
+        # $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/
 
     done
 }
