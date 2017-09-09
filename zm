@@ -246,6 +246,7 @@ usage ()
     add_help "-i,--install-soft name" "install soft"
     add_help "--install-softs" "install all softs in ${os_name}.config.sh"
     add_help "--make-virtual-system" "install system to virtual image file"
+    add_help "--sync-backup" "sync backup file, params like: srcdir dstdir bakname"
 
     add_help "--debug" "print debug infomation"
 
@@ -1755,6 +1756,61 @@ auto_install()
     sync;sync;sync
 }
 
+
+zm_sync_backup()
+{
+    src_dir=$1
+    dst_dir=$2
+    name=$3
+
+    if [ ! -d $src_dir ];then
+        echo "$src_dir not exist"
+        exit 1
+    fi
+    if [ ! -d $dst_dir ];then
+        echo "$dst_dir not exist"
+        exit 1
+    fi
+
+    base_sfs=$name.sfs
+    if [ ! -e $src_dir/$base_sfs ];then
+        base_sfs=$name
+        if [ ! -e $src_dir/$name ];then
+            echo "$src_dir/$base_sfs not exist"
+            exit 1
+        fi
+    fi
+
+    if [ -e $src_dir/$base_sfs.new ];then
+        echo "$src_dir/$base_sfs backup now, waiting..."
+        exit 1
+    fi
+
+    if [ -e $dst_dir/$base_sfs -a $dst_dir/$base_sfs -nt $src_dir/$base_sfs ];then
+        echo "$dst_dir/$base_sfs new than $src_dir/$base_sfs"
+        exit 1
+    fi
+    # stat $dst_dir/$base_sfs $src_dir/$base_sfs
+
+    src_files=$(ls $src_dir/$base_sfs{,.[0-9]} 2>/dev/null || true)
+
+    for sfs in $src_files
+    do
+        filename=$(basename $sfs)
+        printf ">>>>>>> %s -----> %-s\n" $sfs $dst_dir/$filename
+        rsync -aP $sfs $dst_dir/$filename
+    done
+
+    dst_files=$(ls $dst_dir/$base_sfs{,.[0-9]} 2>/dev/null)
+    for sfs in $dst_files
+    do
+        filename=$(basename $sfs)
+        if [ ! -e $src_dir/$filename ];then
+            mv -vf $sfs /tmp/
+        fi
+    done
+}
+
 make_debian_base_system()
 {
     check_binary debootstrap
@@ -2486,41 +2542,6 @@ zm_remove_backup()
             $SUDO rm -rf "$backup_unionfs_dir"
         fi
     done
-}
-
-zm_sync_backup()
-{
-    local bakname="$1"
-    local syncdir="$2"
-
-    if [ -z "$bakname" ];then
-        err "param error, bakname is blank."
-    fi
-
-    if [ -z "$syncdir" ];then
-        syncdir="$zm_curdir"
-    fi
-
-    local sfsfile=$backup_mountdir/${bakname}.sfs
-    if [ -e "$sfsfile" ];then
-        if [ -e $syncdir/${bakname}.sfs ];then
-            backup_file $syncdir/${bakname}.sfs*
-        fi
-        $SUDO rsync -avP ${sfsfile}* $syncdir/
-    fi
-
-    local bakpath=$(get_backup_unionfs_dir "$bakname")
-    local dstpath=$syncdir/unionfs/$bakname
-    if [ -d "$dstpath" ];then
-        backup_file "$dstpath"
-    fi
-
-    if [ -d "$bakpath" ];then
-        if [ "$(ls -A $bakpath)" != "" ];then
-            mkdir -p $syncdir/unionfs
-            $SUDO rsync -avP --delete $bakpath/ $dstpath
-        fi
-    fi
 }
 
 zm_revert_backup()
