@@ -84,7 +84,6 @@ complete -F _zm zm
 
 bak()
 {
-
     local bak_dir="$1"
     local bak_name="$2"
     test -z "$bak_dir" && return 0
@@ -101,6 +100,20 @@ mb()
 {
     local new_dir=$(zm --mount-backup $@)
     test -z "$new_dir" || cd $new_dir
+}
+
+mbb()
+{
+    local bak_name=$1
+
+    local bak_workdir=$zm_backup_workdir/$bak_name/
+    if [ -n "$bak_name" -a -e "$bak_workdir" ];then
+        if echo "$bak_workdir" | grep $(readlink -e $PWD) > /dev/null;then
+            cd ..
+        fi
+        zm --backup-branch $bak_name
+        zm --umount-backup $bak_name
+    fi
 }
 
 umb()
@@ -137,5 +150,6 @@ _umb()
     return 0
 } &&
 complete -F _umb umb
+complete -F _umb mbb
 
 # ex: ts=4 sw=4 et filetype=sh
