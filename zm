@@ -1382,7 +1382,7 @@ update_grub_config()
         grubdev=$(mount | grep -w "$sfs_part_mpath" | awk '{print $1}')
     fi
 
-    local zm_name_param=$(cat /proc/cmdline | tr ' ' '\n' | grep zm_name)
+    local zm_name_param=$(cat /proc/cmdline | tr ' ' '\n' | grep zm_name || true)
     local grubroot="$(mktemp -d)"
     local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
     local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}
@@ -1730,7 +1730,7 @@ zm_set_hostname()
         name="$zm_user"
     fi
 
-    $SUDO hostname $name
+    $SUDO hostnamectl set-hostname $name
     echo "$name" | $SUDO tee /etc/hostname
     $SUDO sed -i "s/^127.0.0.1.*$/127.0.0.1	localhost.localdomain	localhost	 $name/g" /etc/hosts
     $SUDO sed -i "s/^::1.*$/::1	localhost.localdomain	localhost	 $name/g" /etc/hosts
@@ -1834,7 +1834,8 @@ make_archlinux_base_system()
     root_dir=$build_dir/root.$zm_arch
     if [ ! -d "$root_dir" ];then
         md5sum_file=$dl_dir/md5sums.txt
-        download_file $src_url/archlinux/iso/latest/md5sums.txt $md5sum_file
+        download_file $src_url/archlinux/iso/latest/md5sums.txt $md5sum_file.orig
+        grep bootstrap $md5sum_file.orig > $md5sum_file
         bootstrap_file=$(cat $md5sum_file | grep $zm_arch | awk '{print $2}')
         bootstrap_md5=$(cat $md5sum_file | grep $zm_arch | awk '{print $1}')
         download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_md5
