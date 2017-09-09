@@ -98,7 +98,8 @@ bak()
 
 mb()
 {
-    local new_dir=$(zm --mount-backup $@)
+    zm --mount-backup $@
+    local new_dir=$(zm --print-backup-workdir $@)
     test -z "$new_dir" || cd $new_dir
 }
 
@@ -109,7 +110,7 @@ mbb()
     local bak_workdir=$zm_backup_workdir/$bak_name/
     if [ -n "$bak_name" -a -e "$bak_workdir" ];then
         if echo "$bak_workdir" | grep $(readlink -e $PWD) > /dev/null;then
-            cd ..
+            cd /work
         fi
         zm --backup-branch $bak_name
         zm --umount-backup $bak_name
@@ -123,7 +124,7 @@ umb()
     local bak_workdir=$zm_backup_workdir/$bak_name/
     if [ -n "$bak_name" -a -e "$bak_workdir" ];then
         if echo "$bak_workdir" | grep $(readlink -e $PWD) > /dev/null;then
-            cd ..
+            cd /work
         fi
         zm --umount-backup $bak_name
     fi

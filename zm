@@ -839,14 +839,10 @@ __mount_with_aufs()
     local unionfsdir="$4"
     local mountdir="$5"
 
-    test -d "$unionfsdir" || err "unionfsdir: $unionfsdir is not found!"
-    test -d "$mountdir" || err "mountdir: $mountdir is not found!"
-
     upperdir=$unionfsdir/aufs
     $SUDO mkdir -p $upperdir
 
     local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
-    test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
 
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
         # $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
@@ -885,25 +881,21 @@ __mount_with_overlay()
     local unionfsdir="$4"
     local mountdir="$5"
 
-    test -d "$unionfsdir" || err "unionfsdir: $unionfsdir is not found!"
-    test -d "$mountdir" || err "mountdir: $mountdir is not found!"
-
     local workdir=$unionfsdir/work
     upperdir=$unionfsdir/upper
     $SUDO mkdir -p $workdir
     $SUDO mkdir -p $upperdir
 
-    local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
-    test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
-
     if [ -e "${upperdir}/$unionfs_clean_file" ];then
         # $SUDO rm -rf ${upperdir}/{*,.[!.]*,..?*}
+        echo "${upperdir}/$unionfs_clean_file exist, backup unionfs dir"
         backup_file $unionfsdir
     fi
 
     local lowerdir=""
     local sfsmpath=$sfsmountdir/$sfsname
 
+    local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
     mount_storage $sfsfile $sfsmpath
     lowerdir=$(__set_lowerdir ${sfsmpath} $lowerdir)
 
@@ -938,7 +930,38 @@ support_union_fs()
 
 mount_unionfs()
 {
-    # sfsname sfsdir sfsmountdir upperdir mountdir
+    # sfsname sfsdir sfsmountdir unionfsdir mountdir
+
+    local sfsname="$1"
+    local sfsdir="$2"
+    local sfsmountdir=$3
+    local unionfsdir="$4"
+    local mountdir="$5"
+    local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+
+    test -d "$unionfsdir" || err "unionfsdir: $unionfsdir is not found!"
+    test -d "$mountdir" || err "mountdir: $mountdir is not found!"
+
+    local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
+    test -f "$sfsfile" || err "sfsfile: ${sfsdir}/${sfsname}.sfs is not found!"
+
+    if [ "$sfsfile" -nt "$unionfsdir" ];then
+        echo "$sfsfile newer than $unionfsdir, backup $unionfsdir now"
+        backup_file $unionfsdir
+    fi
+
+    for branch in $(seq 1 $unionfs_max_branch)
+    do
+        sfsfile_branch="${sfsfile}.${branch}"
+        if [ ! -e "$sfsfile_branch" ];then
+            break
+        fi
+        if [ "$sfsfile_branch" -nt "$unionfsdir" ];then
+            echo "$sfsfile_branch newer than $unionfsdir, backup $unionfsdir now"
+            backup_file $unionfsdir
+            break
+        fi
+    done
 
     case $(support_union_fs) in
         overlay)
@@ -1764,31 +1787,27 @@ zm_sync_backup()
     name=$3
 
     if [ ! -d $src_dir ];then
-        echo "$src_dir not exist"
-        exit 1
+        err "$src_dir not exist"
     fi
     if [ ! -d $dst_dir ];then
-        echo "$dst_dir not exist"
-        exit 1
+        err "$dst_dir not exist"
     fi
 
     base_sfs=$name.sfs
     if [ ! -e $src_dir/$base_sfs ];then
         base_sfs=$name
         if [ ! -e $src_dir/$name ];then
-            echo "$src_dir/$base_sfs not exist"
-            exit 1
+            err "$src_dir/$base_sfs not exist"
         fi
     fi
 
     if [ -e $src_dir/$base_sfs.new ];then
-        echo "$src_dir/$base_sfs backup now, waiting..."
-        exit 1
+        err "$src_dir/$base_sfs backup now, waiting..."
     fi
 
     if [ -e $dst_dir/$base_sfs -a $dst_dir/$base_sfs -nt $src_dir/$base_sfs ];then
-        echo "$dst_dir/$base_sfs new than $src_dir/$base_sfs"
-        exit 1
+        ls -lh $dst_dir/$base_sfs $src_dir/$base_sfs
+        err "$dst_dir/$base_sfs newer than $src_dir/$base_sfs"
     fi
     # stat $dst_dir/$base_sfs $src_dir/$base_sfs
 
@@ -2384,6 +2403,23 @@ zm_setup_default_locales()
     " > $build_dir/zm_debconf
     run_zm_debconf $build_dir/zm_debconf
     dpkg-reconfigure -u locales || true
+}
+
+zm_print_mount_backup_dir()
+{
+    if [ -z "$@" ];then
+        return
+    fi
+
+    bak_name="$1"
+
+    bak_root_dir=$backup_workdir/$bak_name
+    bak_work_dir=$(readlink -e $work_mountdir/$bak_name)
+    if [ "$bak_work_dir" = "$bak_root_dir" ];then
+        echo $work_mountdir/$bak_name 
+    else
+        echo $bak_root_dir
+    fi
 }
 
 zm_mount_backup()
@@ -3051,7 +3087,12 @@ zm_info()
             exit 0
             ;;
         --print-backup-workdir)
-            echo $backup_workdir
+            shift
+            if [ -z "$1" ];then
+                echo $backup_workdir
+            else
+                zm_print_mount_backup_dir $1
+            fi
             exit 0
             ;;
         --print-backup-mountdir)
