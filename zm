@@ -79,7 +79,13 @@ backup_file()
         if [ -e "$bak_file" ];then
             bak_file_dir=$(dirname $bak_file)/old/$time_dir
             $SUDO mkdir -p $bak_file_dir
-            $SUDO mv -fv ${bak_file} ${bak_file_dir}/
+            name=$(basename $bak_file)
+            if [ -e ${bak_file_dir}/$name ];then
+                name=${name}"."$(date +%H%M%S)
+                $SUDO mv -fv ${bak_file} ${bak_file_dir}/$name
+            else
+                $SUDO mv -fv ${bak_file} ${bak_file_dir}/
+            fi
         fi
     done
 }
@@ -1817,6 +1823,9 @@ zm_sync_backup()
     do
         filename=$(basename $sfs)
         printf ">>>>>>> %s -----> %-s\n" $sfs $dst_dir/$filename
+        if [ -e "$dst_dir/$filename" ];then
+            backup_file $dst_dir/$filename
+        fi
         rsync -aP $sfs $dst_dir/$filename
     done
 
