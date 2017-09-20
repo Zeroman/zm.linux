@@ -1859,7 +1859,7 @@ zm_sync_backup()
         filename=$(basename $sfs)
         dst_sfs=$dst_dir/$filename
         printf "%-40s -> %-s\n" $sfs $dst_sfs
-        rsync -aP -b --backup-dir=$(get_backup_file_dir $dst_dir) $sfs $dst_dir/$filename
+        rsync -aP -b --backup-dir=$(get_backup_file_dir $dst_sfs) $sfs $dst_dir/$filename
     done
 
     dst_files=$(ls $dst_dir/$base_sfs{,.[0-9]} 2>/dev/null)
