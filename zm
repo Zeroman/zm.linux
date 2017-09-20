@@ -1870,6 +1870,17 @@ zm_sync_backup()
             backup_file $sfs
         fi
     done
+        
+    if [ -d $src_dir/unionfs/$name ];then
+        for sfs in $src_files
+        do
+            if [ $sfs -nt $src_dir/unionfs/$name ];then
+                return
+            fi
+        done
+        mkdir -p $dst_dir/unionfs/
+        rsync -arP --delete $src_dir/unionfs/$name $dst_dir/unionfs/$name
+    fi
 }
 
 make_debian_base_system()
