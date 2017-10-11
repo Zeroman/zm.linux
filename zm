@@ -1875,6 +1875,9 @@ zm_sync_backup()
         for sfs in $src_files
         do
             if [ $sfs -nt $src_dir/unionfs/$name ];then
+                if [ -d $dst_dir/unionfs/$name ];then
+                    backup_file $dst_dir/unionfs/$name
+                fi
                 return
             fi
         done
