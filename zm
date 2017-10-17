@@ -641,7 +641,7 @@ install_grub()
     fi
     install_grub_on_dir $root
     # $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
-    $SUDO grub-install $disk --no-floppy --boot-directory=$root/boot --modules="${modules[*]}"
+    $SUDO grub-install $disk --no-floppy --target=i386-pc --boot-directory=$root/boot --modules="${modules[*]}"
     if [ -b "$rootpart" ];then
         umount_device $root
     fi
