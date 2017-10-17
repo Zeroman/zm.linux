@@ -1882,7 +1882,7 @@ zm_sync_backup()
             fi
         done
         mkdir -p $dst_dir/unionfs/
-        rsync -arP --delete $src_dir/unionfs/$name $dst_dir/unionfs/$name
+        rsync -arP --delete $src_dir/unionfs/$name/ $dst_dir/unionfs/$name
     fi
 }
 
