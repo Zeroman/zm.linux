@@ -549,7 +549,9 @@ swap_file()
 
 move_to_newroot()
 {
-    mount_move $sfs_part_mpath ${new_root}
+    # mount_move $sfs_part_mpath ${new_root}
+    mount_storage $sfs_part ${new_root}/$sfs_part_mpath
+
     mount_move $home_mpath ${new_root}
     mount_move $work_mpath ${new_root}
     mount_move $union_mpath ${new_root}
