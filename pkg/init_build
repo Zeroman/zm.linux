@@ -1,0 +1,95 @@
+#!/bin/sh 
+
+set -e
+
+cur_dir=$PWD
+cur_path=$(readlink -f $0)
+cur_workdir=${cur_path%/*}
+
+build_dir=$cur_dir/build
+pkg_dir=$cur_dir/pkg
+
+mkdir -p $build_dir $pkg_dir
+
+build_pkg()
+{
+    pkgname=$1
+
+    pkg_path=$(find $pkg_dir -name "${pkgname}*pkg.tar.[xg]z")
+    if [ -e "$pkg_path" ];then
+        echo "$pkg_path is exists."
+        return
+    fi
+
+    cd $build_dir
+
+    if [ "${pkgname:(-8)}" = "PKGBUILD" ];then
+        wget $pkgname
+        pkgname=$(awk -F= '/pkgname=/{print $2}' PKGBUILD)
+        # pacman -Qq $pkgname > /dev/null 2>&1 && exit
+    else
+        if [ ! -d ${pkgname} ];then
+            # pacman -Qq $pkgname > /dev/null 2>&1 && exit
+            # wget http://aur.archlinux.org/packages/${pkgname:0:2}/${pkgname}/${pkgname}.tar.gz
+            wget -c http://aur.archlinux.org/cgit/aur.git/snapshot/${pkgname}.tar.gz
+            tar xvf ${pkgname}.tar.gz
+        fi
+        cd ${pkgname}
+    fi
+
+    makepkg --noconfirm -sf
+    # makepkg --noconfirm -si $2
+    rm -fv $pkg_dir/${pkgname}*pkg.tar.[xg]z
+    cp -fv ${pkgname}*pkg.tar.[xg]z $pkg_dir/
+}
+
+update_custom_repo()
+{
+    repo_dir=/work/cache/pacman/repo
+    if [ ! -d $repo_dir ];then
+        sudo mkdir -p $repo_dir
+    fi
+    sudo rm -fv $repo_dir/*
+    sudo cp -fv $pkg_dir/*.[xg]z $repo_dir/
+    sudo repo-add $repo_dir/custom.db.tar.gz $repo_dir/*.pkg.tar.[xg]z
+}
+
+clean()
+{
+    rm -rf build pkg
+}
+
+build_all()
+{
+    build_pkg clipit
+    build_pkg cgvg
+    build_pkg apparix
+    build_pkg zeal-git
+    build_pkg ttf-vlgothic
+    build_pkg package-query
+    build_pkg yaourt
+    build_pkg visual-studio-code
+    # build_pkg dbeaver
+    build_pkg redis-desktop-manager
+    build_pkg google-chrome
+    # build_pkg plantuml
+}
+
+case $1 in
+    b|build)
+        build_all
+        ;;
+    u|update)
+        update_custom_repo
+        ;;
+    *)
+        # build_pkg clipit
+        # build_all
+        # build_pkg qemu-git
+        # build_pkg dbeaver
+        build_pkg visual-studio-code
+        # build_pkg plantuml
+        # build_pkg redis-desktop-manager
+        update_custom_repo
+        ;;
+esac
