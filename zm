@@ -2636,31 +2636,33 @@ zm_remove_backup()
 
 zm_revert_backup()
 {
-    local bakname="$1"
+    local bak_name="$1"
     local syncdir="$2"
 }
 
 zm_syncdir_backup()
 {
-    local bakname="$1"
+    local bak_name="$1"
     local syncdir="$2"
 
-    if [ -z "$bakname" ];then
+    if [ -z "$bak_name" ];then
         err "param error, bakname is blank."
     fi
 
     if [ -z "$syncdir" ];then
-        syncdir="$work_mountdir/$bakname"
+        syncdir="$bak_name"
     fi
 
-    if [ -e "$syncdir" ];then
+    if [ -d "$syncdir" ];then
         err "<$FUNCNAME> $syncdir is exist."
     fi
 
     mkdir -p $syncdir
-    local mountdir="$(zm_mount_backup $bakname)"
-    if [ -n "$mountdir" ];then
-        $SUDO rsync -avP $mountdir/ $syncdir
+
+    zm_mount_backup $bak_name
+    bak_root_dir=$backup_workdir/$bak_name
+    if [ -n "$bak_root_dir" ];then
+        $SUDO rsync -avP $bak_root_dir/ $syncdir
     else
         rmdir $syncdir
         err "sync backup to $syncdir error."
