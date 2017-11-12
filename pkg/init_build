@@ -75,12 +75,24 @@ build_all()
     # build_pkg plantuml
 }
 
+clean_pkg()
+{
+    for pkg in $@; do
+        rm pkg/$pkg*
+        rm -rfv build/$pkg*
+    done
+}
+
 case $1 in
     b|build)
         build_all
         ;;
     u|update)
         update_custom_repo
+        ;;
+    c|clean)
+        shift
+        clean_pkg $@
         ;;
     *)
         # build_pkg clipit
