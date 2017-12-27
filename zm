@@ -611,6 +611,7 @@ install_grub()
     items['disk']="/dev/sda"
     items['root']=$(mount | grep sfsroot | awk '{print $1}')
     items['modules']="biosdisk,part_msdos,lvm"
+    items['efi']="/dev/disk/by-label/EFI"
 
     OLD_IFS=$IFS
 
@@ -624,14 +625,10 @@ install_grub()
         items["$item"]="$value"
     done
 
-    local disk=$(readlink -f ${items['disk']})
+    local efi_part=$(readlink -f ${items['efi']})
     local root="${items['root']}"
     local -a modules
     IFS=,; modules=(${items['modules']}); IFS=$OLD_IFS
-
-    check_file_exist $disk
-    log_info "install grub on $disk"
-    dialog_continue "Install grub on $disk, root=$root"
 
     local rootpart=""
     if [ -b "$root" ];then
@@ -641,7 +638,23 @@ install_grub()
     fi
     install_grub_on_dir $root
     # $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
-    $SUDO grub-install $disk --no-floppy --target=i386-pc --boot-directory=$root/boot --modules="${modules[*]}"
+
+    if [ -b "$efi_part" ];then
+        log_info "install grub-efi on $efi_part"
+        dialog_continue "Install grub-efi on $efi_part, root=$rootpart"
+        mount_device $efi_part $efi_dir
+        $SUDO grub-install --no-floppy --boot-directory=$root/boot --target=x86_64-efi --efi-directory=$efi_dir \
+            --modules="part_msdos lvm" --bootloader-id=grub --locales=zh_CN --recheck --debug
+        umount_device $efi_dir
+        efibootmgr
+    else
+        local disk=$(readlink -f ${items['disk']})
+        check_file_exist $disk
+        log_info "install grub on $disk"
+        dialog_continue "Install grub on $disk, root=$root"
+        $SUDO grub-install $disk --no-floppy --target=i386-pc --boot-directory=$root/boot --modules="${modules[*]}"
+    fi
+
     if [ -b "$rootpart" ];then
         umount_device $root
     fi
@@ -2502,7 +2515,7 @@ zm_mount_backup()
 
     test -e $backup_mountdir/${bak_name}.sfs || return 1
 
-    if ! readlink -e $bak_root_dir > /dev/null 2>&1;then
+    if readlink -e $bak_root_dir > /dev/null 2>&1;then
         $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
     fi
     if ! is_mounted $bak_root_dir;then
@@ -2859,6 +2872,7 @@ zm_config()
     fi
 
     mnt_dir=$build_dir/mnt
+    efi_dir=$build_dir/efi
     iso_dir=$build_dir/iso
     sfs_mnt_dir=$build_dir/sfs
     unionfs_dir=$build_dir/unionfs
@@ -2868,6 +2882,7 @@ zm_config()
     soft_list_file=$build_dir/soft_list
 
     mkdir -p $mnt_dir
+    mkdir -p $efi_dir
     mkdir -p $iso_dir
     mkdir -p $sfs_mnt_dir
     mkdir -p $unionfs_dir
