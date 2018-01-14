@@ -99,7 +99,8 @@ case $1 in
         # build_all
         # build_pkg qemu-git
         # build_pkg dbeaver
-        build_pkg visual-studio-code
+        #build_pkg visual-studio-code
+        build_pkg nvidia-docker
         # build_pkg plantuml
         # build_pkg redis-desktop-manager
         update_custom_repo
