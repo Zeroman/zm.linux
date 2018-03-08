@@ -61,7 +61,7 @@ clean()
 
 build_all()
 {
-    build_pkg clipit
+    # build_pkg clipit
     build_pkg cgvg
     build_pkg apparix
     build_pkg zeal-git
@@ -69,9 +69,12 @@ build_all()
     build_pkg package-query
     build_pkg yaourt
     build_pkg visual-studio-code
+    build_pkg ta-lib
+    build_pkg mysql-utilities
+    build_pkg grc
     # build_pkg dbeaver
-    build_pkg redis-desktop-manager
-    build_pkg google-chrome
+    # build_pkg redis-desktop-manager
+    # build_pkg google-chrome
     # build_pkg plantuml
 }
 
@@ -86,6 +89,7 @@ clean_pkg()
 case $1 in
     b|build)
         build_all
+        update_custom_repo
         ;;
     u|update)
         update_custom_repo
@@ -100,9 +104,10 @@ case $1 in
         # build_pkg qemu-git
         # build_pkg dbeaver
         #build_pkg visual-studio-code
-        build_pkg nvidia-docker
+        # build_pkg nvidia-docker
         # build_pkg plantuml
         # build_pkg redis-desktop-manager
+        build_pkg mysql-utilities
         update_custom_repo
         ;;
 esac
