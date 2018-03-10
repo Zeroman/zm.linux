@@ -759,22 +759,6 @@ format_usb_device()
         err "$usb_device is mounted!"
     fi
 
-    total_size=` fdisk -l $usb_device | grep Disk | awk '{print $5}'`
-    total_cyln=`echo $total_size/255/63/512 | bc`
-
-    diskinfo=` sfdisk -H 255 -S 63 -C $total_cyln -l $usb_device | grep Disk`
-    cylns=`echo $diskinfo | awk '{print $3}'`
-    heads=`echo $diskinfo | awk '{print $5}'`
-    sectors=`echo $diskinfo | awk '{print $7}'`
-    disksize=`echo "$cylns*$heads*$sectors*512" | bc`
-    echo disksize = $disksize
-    ext2_size_bytes=2500000000
-    fat_cyln=`echo "($disksize-$ext2_size_bytes)/$heads/$sectors/512" | bc`
-    fat_sectors=`echo "$fat_cyln*$heads*$sectors" | bc`
-    echo fat_cyln = $fat_cyln
-    echo fat_sectors = $fat_sectors
-
-    echo -n " $usb_device size is "
     print_disk_sizeinfo $usb_device
     echo "Format $usb_device now?"
     dialog_continue now
@@ -783,10 +767,15 @@ format_usb_device()
     sync;sleep 1;
     blockdev --rereadpt $usb_device
 
-    sfdisk --label dos $usb_device -H 255 -S 63 -C $total_cyln << EOF
-,$fat_cyln,0xc,*
-,,0x83,-
-EOF
+    if $zm_efi;then
+        $SUDO parted -s -a optimal $usb_device mklabel gpt
+        $SUDO parted -s -a optimal $usb_device mkpart primary vfat 0% 50%
+        $SUDO parted -s -a optimal $usb_device mkpart primary ext2 50% 100%
+    else
+        $SUDO parted -s -a optimal $usb_device mklabel msdos
+        $SUDO parted -s -a optimal $usb_device mkpart primary vfat 0% 50%
+        $SUDO parted -s -a optimal $usb_device mkpart primary ext2 50% 100%
+    fi
     sync;sync;sync
 
     sleep 3;
@@ -1608,8 +1597,14 @@ init_qemu_disk()
     if [ -e /usr/lib/syslinux/mbr.bin ];then
         $SUDO dd if=/usr/lib/syslinux/mbr.bin of=/dev/nbd${index}
     fi
-    $SUDO parted -s -a optimal /dev/nbd${index} mklabel msdos
-    $SUDO parted -s -a optimal /dev/nbd${index} mkpart primary ext2 0% 100%
+
+    if $zm_efi;then
+        $SUDO parted -s -a optimal /dev/nbd${index} mklabel gpt
+        $SUDO parted -s -a optimal /dev/nbd${index} mkpart primary ext2 0% 100%
+    else
+        $SUDO parted -s -a optimal /dev/nbd${index} mklabel msdos
+        $SUDO parted -s -a optimal /dev/nbd${index} mkpart primary ext2 0% 100%
+    fi
 
     while [ ! -e /dev/nbd${index}p1 ];do
         $SUDO blockdev --rereadpt /dev/nbd${index}
@@ -2829,6 +2824,8 @@ zm_config()
                 ;;
             --kernel-params) zm_argv_del $1;shift; kernel_params="$1"; zm_argv_del $1;shift;
                 ;;
+            --efi) zm_argv_del $1;shift; zm_efi=true;
+                ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
             *) shift; 
@@ -3208,6 +3205,7 @@ fi
 zm_argv=$@
 zm_clean=true
 zm_debug=false
+zm_efi=false
 
 export zm_debug
 
