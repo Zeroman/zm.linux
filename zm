@@ -1479,7 +1479,18 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
     echo "submenu 'zm linux  ->' --class=submenu --class ${os_class} {
     search --no-floppy -l --set=root sfsroot 
     " | $SUDO tee -a $linuxcfg > /dev/null
-    items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
+    echo "
+    menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch} resure)' --class=submenu --class ${os_class} {
+        set root_uuid=$boot_uuid
+        search --no-floppy --fs-uuid --set=root \$root_uuid
+        set zm_dir=$temp_path
+        echo 'Loading $zm_arch kernel...'
+        linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params modprobe.blacklist=nouveau systemd.unit=rescue.target
+        echo 'Loading $zm_arch initrd...'
+        initrd \$zm_dir/${initrd_name}
+    }
+        " | $SUDO tee -a $linuxcfg > /dev/null
+        items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
     if [ -n "$items" ];then
         echo "submenu 'zm linux (old) ->' --class=submenu --class ${os_class} {
         search --no-floppy -l --set=root sfsroot " | $SUDO tee -a $linuxcfg > /dev/null
@@ -1488,10 +1499,10 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
             echo "
         menuentry '${dir}' --class=submenu --class ${os_class} {
             set     zm_dir=/linux/${dir}
-            linux	\$zm_dir/vmlinuz $base_kernel_params
+            linux	\$zm_dir/vmlinuz sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params
             initrd	\$zm_dir/initrd.img
-            savedefault
-        } " | $SUDO tee -a $linuxcfg > /dev/null
+        } 
+        " | $SUDO tee -a $linuxcfg > /dev/null
         done
         echo "}" | $SUDO tee -a $linuxcfg > /dev/null
     fi
