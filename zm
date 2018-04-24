@@ -644,7 +644,7 @@ install_grub()
         dialog_continue "Install grub-efi on $efi_part, root=$rootpart"
         mount_device $efi_part $efi_dir
         $SUDO grub-install --no-floppy --boot-directory=$root/boot --target=x86_64-efi --efi-directory=$efi_dir \
-            --modules="part_msdos lvm" --bootloader-id=grub --locales=zh_CN --recheck --debug
+            --modules="part_msdos lvm" --bootloader-id=grub --locales=zh_CN --recheck --debug --removable
         umount_device $efi_dir
         efibootmgr
     else
