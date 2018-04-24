@@ -601,8 +601,8 @@ install_grub_on_dir()
     check_file_exist /usr/lib/grub/i386-pc
 
     $SUDO mkdir -p $installdir/boot/grub
-    $SUDO $CP /usr/lib/grub/i386-pc $installdir/boot/grub/
-    $SUDO $CP $zm_workdir/boot/grub/* $installdir/boot/grub/
+    $SUDO $CP /usr/lib/grub/i386-pc $installdir/boot/grub/ || true
+    $SUDO $CP $zm_workdir/boot/grub/* $installdir/boot/grub/ || true
 }
 
 install_grub()
@@ -2129,7 +2129,7 @@ add_debian_base_softs()
     add_soft aptitude lsof
     add_soft acpi-support acpi
     add_soft hdparm usbutils lshw 
-    add_soft module-init-tools dosfstools exfat-utils ntfs-3g busybox mbr 
+    add_soft dosfstools exfat-utils ntfs-3g busybox mbr 
     add_soft iproute realpath rsync util-linux gpart debootstrap pciutils 
     add_soft systemd
     add_soft e2fsprogs
