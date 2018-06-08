@@ -12,7 +12,7 @@ case "$1" in
 esac
 
 . /usr/share/initramfs-tools/hook-functions
-copy_exec /usr/bin/rsync /bin
+#copy_exec /usr/bin/rsync /bin
 copy_exec /sbin/fsck /bin
 copy_exec /sbin/fsck.ext2 /bin
 copy_exec /sbin/fsck.ext3 /bin

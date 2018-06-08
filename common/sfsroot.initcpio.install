@@ -6,7 +6,7 @@ build() {
     add_binary mkswap
     add_binary swapon
     add_binary free
-    add_binary rsync
+    #add_binary rsync
     add_binary which
     add_binary readlink
     add_module overlay

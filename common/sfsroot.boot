@@ -389,10 +389,10 @@ init_sfs()
         mkdir -p $sfs_ram_mpath
         mount -t tmpfs -o mode=755 tmpfs $sfs_ram_mpath
 
-        rsync -rhP ${root_file}* $sfs_ram_mpath
+        cp -fv ${root_file}* $sfs_ram_mpath
         root_file=$sfs_ram_mpath/$(basename $root_sfs)
         if [ -e "$home_file" ];then
-            rsync -rhP ${home_file}* $sfs_ram_mpath
+            cp -fv ${home_file}* $sfs_ram_mpath
             home_file=$sfs_ram_mpath/$(basename $home_sfs)
         fi
         sfs_dir=$sfs_ram_mpath
@@ -571,6 +571,10 @@ move_to_newroot()
 {
     # mount_move $sfs_part_mpath ${new_root}
     mount_storage $sfs_part ${new_root}/$sfs_part_mpath
+
+    #if $sfs_in_mem;then
+        #mount_move $sfs_ram_mpath ${new_root}
+    #fi
 
     mount_move $home_mpath ${new_root}
     mount_move $work_mpath ${new_root}
