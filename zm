@@ -103,6 +103,9 @@ get_backup_file_dir()
     # local time_dir=$(date +%y%m%d_%H%M)
     local time_dir=$(date +%y%m%d)
     bak_file_dir=$(dirname $bak_file)/old/$time_dir
+    if [ -d /work/sfsroot_backup ];then
+        bak_file_dir=/work/sfsroot_backup/old/$time_dir
+    fi
     echo $bak_file_dir
 }
 
@@ -602,7 +605,7 @@ install_grub_on_dir()
 
     $SUDO mkdir -p $installdir/boot/grub
     $SUDO $CP /usr/lib/grub/i386-pc $installdir/boot/grub/ || true
-    $SUDO $CP $zm_workdir/boot/grub/* $installdir/boot/grub/ || true
+    $SUDO $CP $zm_workdir/boot/* $installdir/boot/ || true
 }
 
 install_grub()
@@ -923,6 +926,7 @@ __mount_with_overlay()
     local sfsmountdir=$3
     local unionfsdir="$4"
     local mountdir="$5"
+    local merge="$6"
 
     local workdir=$unionfsdir/work
     upperdir=$unionfsdir/upper
@@ -939,8 +943,11 @@ __mount_with_overlay()
     local sfsmpath=$sfsmountdir/$sfsname
 
     local sfsfile=$(readlink -f "${sfsdir}/${sfsname}.sfs")
-    mount_storage $sfsfile $sfsmpath
-    lowerdir=$(__set_lowerdir ${sfsmpath} $lowerdir)
+
+    if [ -z "$merge" ];then
+        mount_storage $sfsfile $sfsmpath
+        lowerdir=$(__set_lowerdir ${sfsmpath} $lowerdir)
+    fi
 
     for branch in $(seq 1 $unionfs_max_branch)
     do
@@ -1278,11 +1285,20 @@ gen_common_sfs()
         cat $temp_exclude_file
     fi
 
-    $SUDO rm -fv ${dstsfs}.new
-    $SUDO mksquashfs ${srcdir} ${dstsfs}.new -noappend -comp lz4 -regex -ef $temp_exclude_file
+    dst_dir=$(dirname $dstsfs)
+    dst_name=$(basename $dstsfs)
+    res_space=$(df -k $dst_dir | tail -1 | awk '{print $4}')
+    dstsfs_new=${dstsfs}.new
+    if [ $res_space -lt 5000000 ];then
+        dstsfs_new=/tmp/$dst_name
+    fi
+
+
+    $SUDO rm -fv $dstsfs_new
+    $SUDO mksquashfs ${srcdir} ${dstsfs_new} -noappend -comp lz4 -regex -ef $temp_exclude_file
 
     backup_file ${dstsfs} ${dstsfs}.[0-9]
-    $SUDO mv ${dstsfs}.new ${dstsfs}
+    $SUDO mv ${dstsfs_new} ${dstsfs}
     $SUDO touch ${srcdir}/$unionfs_clean_file
 
     rm -f $temp_exclude_file
@@ -2585,6 +2601,24 @@ zm_backup_branch()
     gen_common_sfs $bak_path ${sfsfile}.${branch}
 }
 
+zm_merge_branch()
+{
+    local sfsfile="$1"
+    local bak_path=$(dirname "$sfsfile")
+
+    if [ ! -e "$sfsfile" ];then
+        err "param error, $sfsfile is not exist."
+    fi
+
+    bak_name=$(basename -s .sfs $sfsfile)
+    bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
+    bak_root_dir=
+    mount_unionfs $bak_name $backup_mountdir $sfs_mpath $bak_unionfs_dir $bak_root_dir
+
+    branch=1.new
+    gen_common_sfs $bak_path ${sfsfile}.${branch}
+}
+
 show_backup_info()
 {
     for bak_name in $@;do
@@ -3004,6 +3038,8 @@ zm_excute()
             --backup-dir) shift; zm_backup_dir $@; exit 0;
                 ;;
             --backup-branch) shift; zm_backup_branch $1; exit 0;
+                ;;
+            --merge-branch)  shift; zm_merge_branch $1; exit 0;
                 ;;
             --remove-backup-branch) shift; zm_remove_backup_branch $@; exit 0;
                 ;;
