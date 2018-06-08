@@ -31,6 +31,8 @@ home_part=""
 work_part=""
 backup_part=""
 
+sfs_dir=""
+sfs_in_mem=false
 sfs_show=false
 union_show=true
 
@@ -51,6 +53,7 @@ union_min_size=1024
 sfs_part_mpath=/media/sfsroot
 sfs_mpath=/media/sfs
 union_mpath=/media/union
+sfs_ram_mpath=$sfs_mpath/ram
 sfs_root_mpath=$sfs_mpath/root
 sfs_home_mpath=$sfs_mpath/home
 union_root_mpath=""
@@ -260,6 +263,9 @@ init_params()
             zm_save=*)
                 zm_save=${x#zm_save=}
                 ;;
+            sfs_in_mem)
+                sfs_in_mem=true
+                ;;
             debug)
                 zm_debug=true
                 set -x
@@ -373,9 +379,23 @@ init_sfs()
     home_sfs="$zm_dir/home.sfs"
     root_file=$sfs_part_mpath/${root_sfs}
     home_file=$sfs_part_mpath/${home_sfs}
+    sfs_dir=$sfs_part_mpath/$zm_dir
 
     if ! readlink -f "$root_file";then
         err_exit "Not found root sfs file!"
+    fi
+
+    if $sfs_in_mem;then
+        mkdir -p $sfs_ram_mpath
+        mount -t tmpfs -o mode=755 tmpfs $sfs_ram_mpath
+
+        rsync -rhP ${root_file}* $sfs_ram_mpath
+        root_file=$sfs_ram_mpath/$(basename $root_sfs)
+        if [ -e "$home_file" ];then
+            rsync -rhP ${home_file}* $sfs_ram_mpath
+            home_file=$sfs_ram_mpath/$(basename $home_sfs)
+        fi
+        sfs_dir=$sfs_ram_mpath
     fi
 
     test -b "$home_part" || home_part="$(get_zm_part 'home')"
@@ -513,7 +533,7 @@ mount_root()
         mkdir -p -m 0755 $union_root_mpath
         mount -t tmpfs -o mode=755,size=${root_mem_size}m none $union_root_mpath 
     fi
-    mount_union root $sfs_part_mpath/$zm_dir $sfs_mpath $union_root_mpath ${new_root}/$root_mpath
+    mount_union root $sfs_dir $sfs_mpath $union_root_mpath ${new_root}/$root_mpath
 }
 
 mount_home()
@@ -534,7 +554,7 @@ mount_home()
     fi
 
     mkdir -p -m 0755 $home_mpath
-    mount_union home $sfs_part_mpath/$zm_dir $sfs_mpath $union_home_mpath $home_mpath
+    mount_union home $sfs_dir $sfs_mpath $union_home_mpath $home_mpath
 }
 
 swap_file() 
