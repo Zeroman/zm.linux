@@ -16,7 +16,7 @@ if [ -e /scripts/functions ];then
     . /scripts/functions
 fi
 
-os_name=""
+os_name="archlinux"
 if uname -a | grep "Debian" > /dev/null 2>&1;then
     os_name="debian"
 fi

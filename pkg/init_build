@@ -107,7 +107,8 @@ case $1 in
         # build_pkg nvidia-docker
         # build_pkg plantuml
         # build_pkg redis-desktop-manager
-        build_pkg mysql-utilities
+        build_pkg yaourt
+        #build_pkg mysql-utilities
         update_custom_repo
         ;;
 esac

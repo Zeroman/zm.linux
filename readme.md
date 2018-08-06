@@ -17,3 +17,10 @@ grub-install: error: embedding is not possible, but this is required for RAID an
 ```
 qemu-system-x86_64 -m 512 -hda /dev/sdc --bios /usr/share/ovmf/x64/OVMF_CODE.fd
 ```
+
+https://wiki.archlinux.org/index.php/Secure_Boot
+
+
+https://wiki.gentoo.org/wiki/Efibootmgr
+efibootmgr -c -d /dev/sda -p 2 -L "Gentoo" -l "\efi\boot\bootx64.efi"
+efibootmgr -c -d /dev/sda -p 2 -L "Win10Setup" -l "\bootmgr.efi"
