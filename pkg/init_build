@@ -68,11 +68,10 @@ build_all()
     build_pkg ttf-vlgothic
     build_pkg package-query
     build_pkg yaourt
-    build_pkg visual-studio-code
+    build_pkg visual-studio-code-bin
     build_pkg ta-lib
     build_pkg mysql-utilities
     build_pkg grc
-    # build_pkg dbeaver
     # build_pkg redis-desktop-manager
     # build_pkg google-chrome
     # build_pkg plantuml
@@ -102,7 +101,6 @@ case $1 in
         # build_pkg clipit
         # build_all
         # build_pkg qemu-git
-        # build_pkg dbeaver
         #build_pkg visual-studio-code
         # build_pkg nvidia-docker
         # build_pkg plantuml

@@ -2203,7 +2203,7 @@ install_debian_soft()
 install_archlinux_soft()
 {
     # pacman -Suy --noconfirm
-    $SUDO pacman -S --force --needed --noconfirm $@
+    $SUDO pacman -S --overwrite --needed --noconfirm $@
 }
 
 install_soft()
