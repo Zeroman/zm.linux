@@ -2260,11 +2260,11 @@ install_archlinux_softs()
     # add_soft 
     zm_user_command zm_add_softs
     if [ ! -e /tmp/.pacman.update ];then
-        $SUDO pacman -Suy --force --noconfirm
-        $SUDO pacman -S --force --needed --noconfirm archlinux-keyring
+        $SUDO pacman -Squy --force --noconfirm
+        $SUDO pacman -Sq --force --needed --noconfirm archlinux-keyring
         touch /tmp/.pacman.update
     fi
-    $SUDO pacman -S --force --needed --noconfirm $(cat $soft_list_file)
+    $SUDO pacman -Sq --force --needed --noconfirm $(cat $soft_list_file) 2>&1 | grep -v ^warning
 
     if [ -n "$archlinux_aur_softs" -a "$(id -u)" != "0" ];then
         repo_dir=/work/cache/pacman/repo
