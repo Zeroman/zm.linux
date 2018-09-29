@@ -1469,7 +1469,7 @@ update_grub_config()
     local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
     local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}
     local os_class=${os_name/.*}
-    local base_kernel_params="cgroup_enable=memory swapaccount=1 $zm_name_param" #for docker
+    local base_kernel_params="cgroup_enable=memory swapaccount=1 nmi_watchdog=0 $zm_name_param" #for docker
 
 
     mount_device $grubdev $grubroot
