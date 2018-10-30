@@ -2146,7 +2146,7 @@ add_debian_base_softs()
     add_soft acpi-support acpi
     add_soft hdparm usbutils lshw 
     add_soft dosfstools exfat-utils ntfs-3g busybox mbr 
-    add_soft iproute realpath rsync util-linux gpart debootstrap pciutils 
+    add_soft rsync util-linux gpart debootstrap pciutils 
     add_soft systemd
     add_soft e2fsprogs
     add_soft lftp less bc
@@ -2331,6 +2331,12 @@ zm_user_command()
     cmd=$1
     shift
     test -z "$cmd" && return
+    if command -v $cmd > /dev/null 2>&1;then
+        $cmd $*
+        return
+    fi
+
+    cmd=default_$cmd
     if command -v $cmd > /dev/null 2>&1;then
         $cmd $*
         return
