@@ -2954,7 +2954,7 @@ zm_config()
         zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}
     fi
 
-    if [ -z "$zm_user_dir" ];then
+    if [ -z "$zm_user_dir" -a "$zm_user" = "zm" ];then
         zm_user_home=$(eval echo ~$zm_user)
         if [ -d $zm_user_home/.zm ];then
             zm_user_dir=$zm_user_home/.zm
