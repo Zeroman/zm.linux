@@ -1961,7 +1961,7 @@ make_archlinux_base_system()
         bootstrap_file=$(cat $md5sum_file | grep $zm_arch | awk '{print $2}')
         bootstrap_md5=$(cat $md5sum_file | grep $zm_arch | awk '{print $1}')
         download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_md5
-        tar xvf /work/cache/pacman/pkg/$bootstrap_file -C $build_dir/
+        tar xf /work/cache/pacman/pkg/$bootstrap_file -C $build_dir/
     fi
 
     echo "Server = $src_url/archlinux/\$repo/os/\$arch" > $root_dir/etc/pacman.d/mirrorlist
