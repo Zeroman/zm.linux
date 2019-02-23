@@ -1830,8 +1830,8 @@ zm_set_hostname()
 
     $SUDO hostnamectl set-hostname $name
     echo "$name" | $SUDO tee /etc/hostname
-    $SUDO sed -i "s/^127.0.0.1.*$/127.0.0.1	localhost.localdomain	localhost	 $name/g" /etc/hosts
-    $SUDO sed -i "s/^::1.*$/::1	localhost.localdomain	localhost	 $name/g" /etc/hosts
+    #$SUDO sed -i "s/^127.0.0.1.*$/127.0.0.1	localhost.localdomain	localhost	 $name/g" /etc/hosts
+    #$SUDO sed -i "s/^::1.*$/::1	localhost.localdomain	localhost	 $name/g" /etc/hosts
 }
 
 auto_install()
