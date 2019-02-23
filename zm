@@ -1115,7 +1115,9 @@ zm_chroot()
     fi
 
     os_name=$(show_os_name $chroot_dir)
-    zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}
+    if [ ! -d "$zm_dir" ];then
+        zm_dir=$sfs_part_mpath/linux/${zm_user}.${os_name}.${zm_arch}
+    fi
 
     local chroot_cmd="$SUDO systemd-nspawn -M $zm_user -bD $chroot_dir"
     if [ -d "$cache_dir" ];then
@@ -1995,7 +1997,7 @@ make_system()
         archlinux)
             make_archlinux_base_system
             cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
-            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng"
+            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng vim networkmanager"
             cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm $base_softs;"
             ;;
         *)
