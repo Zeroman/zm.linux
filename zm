@@ -32,8 +32,9 @@ archlinux_aur_softs=""
 
 
 log_file=/tmp/.zm.log
-> $log_file
-chmod 666 $log_file
+if [ -e $log_file ];then
+    $SUDO chmod 777 $log_file
+fi
 
 err()
 {   
@@ -1502,7 +1503,7 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
         search --no-floppy --fs-uuid --set=root \$root_uuid
         set zm_dir=$temp_path
         echo 'Loading $zm_arch kernel...'
-        linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params modprobe.blacklist=nouveau systemd.unit=rescue.target
+        linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params nomodeset modprobe.blacklist=nouveau systemd.unit=rescue.target
         echo 'Loading $zm_arch initrd...'
         initrd \$zm_dir/${initrd_name}
     }
@@ -1531,7 +1532,6 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
         set     zm_dir=/linux/${dir}
         linux	\$zm_dir/vmlinuz nomodeset
         initrd	\$zm_dir/initrd.img
-        savedefault
     } " | $SUDO tee -a $linuxcfg > /dev/null
     done
     echo "}" | $SUDO tee -a $linuxcfg > /dev/null
