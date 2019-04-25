@@ -961,7 +961,7 @@ __mount_with_overlay()
     done
 
     # debug_var lowerdir
-    options="lowerdir=$lowerdir,upperdir=$upperdir,workdir=$workdir"
+    options="lowerdir=$lowerdir,upperdir=$upperdir,workdir=$workdir,index=off,xino=off"
     $SUDO mount -t overlay -o $options overlay $mountdir
 }
 
