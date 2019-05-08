@@ -31,7 +31,7 @@ backup_workdir=/media/bak
 archlinux_aur_softs=""
 
 
-log_file=/tmp/.zm.log
+log_file=/tmp/.zm_$USER.log
 if [ -e $log_file ];then
     $SUDO chmod 777 $log_file
 fi
