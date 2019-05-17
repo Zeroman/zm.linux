@@ -1346,6 +1346,7 @@ gen_home_sfs()
     .*/.backup/.*
     .*/.xsession-errors
     .*/.kermit.log
+    .*/.bash_history
     .*libreoffice.*' | $SUDO tee $1/.zmignore
     gen_common_sfs $1 $2 
 }
@@ -1997,7 +1998,7 @@ make_system()
         archlinux)
             make_archlinux_base_system
             cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
-            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng vim networkmanager"
+            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng neovim diffutils networkmanager"
             cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm $base_softs;"
             ;;
         *)
@@ -3141,9 +3142,9 @@ zm_init()
     keep_build_dir="no"
 
     # no multimedia
-    src_url=http://mirrors.tuna.tsinghua.edu.cn
+    #src_url=http://mirrors.tuna.tsinghua.edu.cn
     # src_url=http://mirrors.163.com
-    # src_url=http://mirrors.aliyun.com
+     src_url=http://mirrors.aliyun.com
     # src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
