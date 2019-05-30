@@ -296,6 +296,7 @@ usage ()
     add_help "--make-virtual-system" "install system to virtual image file"
     add_help "--sync-backup" "sync backup file, params like: srcdir dstdir bakname"
     add_help "--skip-backup-old" "skip backup old"
+    add_help "--skip-create-link" "skip create link"
 
     add_help "--debug" "print debug infomation"
 
@@ -866,7 +867,7 @@ umount_storage()
     if [ -e "$mount_point" ];then
         $SUDO umount $mount_point || err "umount $@ error"
         if [ -d "$mount_point" ];then
-            $SUDO rmdir $mount_point
+            $SUDO rmdir -p $mount_point || true
         fi
     fi
 }
@@ -2568,6 +2569,14 @@ zm_mount_backup()
         $SUDO chown $UID $bak_unionfs_dir
         $SUDO chown $UID $bak_root_dir
     fi
+ 
+    if [ -e $bak_root_dir/.zmargs ];then
+        zm_config $(cat $bak_root_dir/.zmargs)
+    fi
+
+    if $zm_skip_create_link;then
+        return 0
+    fi
 
     if [ -L $work_mountdir/$bak_name ];then
         bak_work_dir=$(readlink -e $work_mountdir/$bak_name)
@@ -2884,6 +2893,8 @@ zm_config()
             --efi) zm_argv_del $1;shift; zm_efi=true;
                 ;;
             --skip-backup-old) zm_argv_del $1;shift; zm_skip_backup_old=true;
+                ;;
+            --skip-create-link) zm_argv_del $1;shift; zm_skip_create_link=true;
                 ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
@@ -3272,6 +3283,7 @@ zm_clean=true
 zm_debug=false
 zm_efi=false
 zm_skip_backup_old=false
+zm_skip_create_link=false
 
 export zm_debug
 
