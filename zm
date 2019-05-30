@@ -1305,7 +1305,9 @@ gen_common_sfs()
     $SUDO rm -fv $dstsfs_new
     $SUDO mksquashfs ${srcdir} ${dstsfs_new} -noappend -comp lz4 -regex -ef $temp_exclude_file
 
-    backup_file ${dstsfs} ${dstsfs}.[0-9]
+    if [ ! -e $dst_dir/.skip_backup ];then
+        backup_file ${dstsfs} ${dstsfs}.[0-9]
+    fi
     $SUDO mv ${dstsfs_new} ${dstsfs}
     $SUDO touch ${srcdir}/$unionfs_clean_file
 
