@@ -104,9 +104,9 @@ get_backup_file_dir()
     # local time_dir=$(date +%y%m%d_%H%M)
     local time_dir=$(date +%y%m%d)
     bak_file_dir=$(dirname $bak_file)/old/$time_dir
-    if [ -d /work/sfsroot_backup ];then
-        bak_file_dir=/work/sfsroot_backup/old/$time_dir
-    fi
+    #if [ -d /work/sfsroot_backup ];then
+        #bak_file_dir=/work/sfsroot_backup/old/$time_dir
+    #fi
     echo $bak_file_dir
 }
 
@@ -3264,6 +3264,10 @@ if [ $# -eq 0 -o "$1" = "--help" ];then
 fi
 
 zm_argv=$@
+if [ -e $PWD/.zmargs ];then
+    zm_argv+=" $(cat $PWD/.zmargs)"
+fi
+
 zm_clean=true
 zm_debug=false
 zm_efi=false
