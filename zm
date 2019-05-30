@@ -115,6 +115,9 @@ backup_file()
     while [ $# -gt 0 ]; do
         bak_file=$1
         shift
+        if $zm_skip_backup_old;then
+            continue
+        fi
         if [ -e "$bak_file" ];then
             bak_file_dir=$(get_backup_file_dir $bak_file)
             $SUDO mkdir -p $bak_file_dir
@@ -292,6 +295,7 @@ usage ()
     add_help "--install-softs" "install all softs in ${os_name}.config.sh"
     add_help "--make-virtual-system" "install system to virtual image file"
     add_help "--sync-backup" "sync backup file, params like: srcdir dstdir bakname"
+    add_help "--skip-backup-old" "skip backup old"
 
     add_help "--debug" "print debug infomation"
 
@@ -2879,6 +2883,8 @@ zm_config()
                 ;;
             --efi) zm_argv_del $1;shift; zm_efi=true;
                 ;;
+            --skip-backup-old) zm_argv_del $1;shift; zm_skip_backup_old=true;
+                ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
             *) shift; 
@@ -3261,6 +3267,7 @@ zm_argv=$@
 zm_clean=true
 zm_debug=false
 zm_efi=false
+zm_skip_backup_old=false
 
 export zm_debug
 
