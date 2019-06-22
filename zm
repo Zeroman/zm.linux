@@ -1307,6 +1307,8 @@ gen_common_sfs()
 
     if [ ! -e $dst_dir/.skip_backup ];then
         backup_file ${dstsfs} ${dstsfs}.[0-9]
+    else
+        rm -fv ${dstsfs} ${dstsfs}.[0-9]
     fi
     $SUDO mv ${dstsfs_new} ${dstsfs}
     $SUDO touch ${srcdir}/$unionfs_clean_file
