@@ -867,7 +867,7 @@ umount_storage()
     if [ -e "$mount_point" ];then
         $SUDO umount $mount_point || err "umount $@ error"
         if [ -d "$mount_point" ];then
-            $SUDO rmdir -p $mount_point || true
+            $SUDO rmdir --ignore-fail-on-non-empty -p $mount_point || true
         fi
     fi
 }
@@ -1308,7 +1308,7 @@ gen_common_sfs()
     if [ ! -e $dst_dir/.skip_backup ];then
         backup_file ${dstsfs} ${dstsfs}.[0-9]
     else
-        rm -fv ${dstsfs} ${dstsfs}.[0-9]
+        $SUDO rm -fv ${dstsfs} ${dstsfs}.[0-9]
     fi
     $SUDO mv ${dstsfs_new} ${dstsfs}
     $SUDO touch ${srcdir}/$unionfs_clean_file
