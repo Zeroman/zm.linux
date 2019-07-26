@@ -1319,6 +1319,7 @@ gen_common_sfs()
 gen_root_sfs()
 {
     echo '
+    README
     sys/.* 
     proc/.* 
     run/.* 
@@ -1356,6 +1357,7 @@ gen_home_sfs()
     .*/.xsession-errors
     .*/.kermit.log
     .*/.bash_history
+    .*/.config/libreoffice/4/user/registrymodifications.xcu
     .*libreoffice.*' | $SUDO tee $1/.zmignore
     gen_common_sfs $1 $2 
 }
