@@ -98,6 +98,7 @@ case $1 in
         clean_pkg $@
         ;;
     *)
+        build_pkg yaourt
         # build_pkg clipit
         # build_all
         # build_pkg qemu-git
@@ -107,7 +108,7 @@ case $1 in
         # build_pkg redis-desktop-manager
         #build_pkg yaourt
         #build_pkg msbuild-stable
-        build_pkg fsharp
+        #build_pkg fsharp
         #build_pkg monodevelop-stable
         #build_pkg mysql-utilities
         update_custom_repo

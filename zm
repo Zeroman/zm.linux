@@ -1358,7 +1358,8 @@ gen_home_sfs()
     .*/.kermit.log
     .*/.bash_history
     .*/.config/libreoffice/4/user/registrymodifications.xcu
-    .*libreoffice.*' | $SUDO tee $1/.zmignore
+    .*libreoffice.*
+    ' | $SUDO tee $1/.zmignore
     gen_common_sfs $1 $2 
 }
 
