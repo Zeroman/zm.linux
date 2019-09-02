@@ -1210,7 +1210,7 @@ get_kernel_file()
             fi
             ;;
         archlinux)
-            vmlinuz=$(readlink -f /boot/vmlinuz-linux)
+            vmlinuz=$(readlink -f /boot/vmlinuz-linux-lts)
             ;;
         *)
             vmlinuz=""
@@ -2010,7 +2010,7 @@ make_system()
         archlinux)
             make_archlinux_base_system
             cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
-            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng neovim diffutils networkmanager"
+            local base_softs="linux-lts file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng neovim diffutils networkmanager"
             cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm $base_softs;"
             ;;
         *)
