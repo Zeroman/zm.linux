@@ -104,9 +104,10 @@ get_backup_file_dir()
     # local time_dir=$(date +%y%m%d_%H%M)
     local time_dir=$(date +%y%m%d)
     bak_file_dir=$(dirname $bak_file)/old/$time_dir
-    #if [ -d /work/sfsroot_backup ];then
-        #bak_file_dir=/work/sfsroot_backup/old/$time_dir
-    #fi
+    #有时候磁盘空间不够，就备份到work
+    if [ -d /work/sfsroot_backup ];then
+        bak_file_dir=/work/sfsroot_backup/old/$time_dir
+    fi
     echo $bak_file_dir
 }
 
@@ -710,9 +711,15 @@ init_lvm_partition()
             continue
         fi
 
-        local num=$(echo $part | sed -re 's/[^0-9]*([0-9]*).*$/\1/;')
-        local disk=$(echo $part | sed -re 's/([^0-9]*)[0-9]*$/\1/;')
-        if [ -n "$num" ];then
+        part_name=$(basename $part)
+        sys_part=/sys/class/block/$part_name
+        if [ ! -e $sys_part ];then
+            echo "not exist /sys/class/block/$part_name, break now"
+            return
+        fi
+        local num=$(cat $sys_part/partition)
+        local disk=/dev/$(basename $(dirname $(readlink -f $sys_part)))
+        if [ -n "$num" -a -b $disk ];then
             $SUDO parted $disk set $num lvm on
         fi
     done

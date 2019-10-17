@@ -24,3 +24,12 @@ https://wiki.archlinux.org/index.php/Secure_Boot
 https://wiki.gentoo.org/wiki/Efibootmgr
 efibootmgr -c -d /dev/sda -p 2 -L "Gentoo" -l "\efi\boot\bootx64.efi"
 efibootmgr -c -d /dev/sda -p 2 -L "Win10Setup" -l "\bootmgr.efi"
+
+#查看
+efibootmgr -v
+#删除
+efibootmgr -b 0001 -B
+#创建
+efibootmgr -c -w -L "HDD GRUB" -d /dev/sda -p 2 -l \\EFI\\GRUB\\bootx64.efi
+#修改boot 顺序
+efibootmgr -o 0012,0010,0011,000F,000D,000C,000B
