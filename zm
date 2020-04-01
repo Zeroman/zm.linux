@@ -2388,7 +2388,7 @@ zm_setup_user()
         $SUDO groupadd -g $userid $zm_user 
         $SUDO useradd -m -s /bin/bash -u $userid -g $userid $zm_user
         # useradd -m -s /bin/zsh -u $userid -g $userid $zm_user
-        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers uucp docker disk rfkill
+        zm_add_groups floppy dialout audio video plugdev netdev sudo kvm vboxusers uucp docker disk wheel #wheel for blueman
         # echo "
         # $zm_user    ALL=NOPASSWD: /bin/mount
         # $zm_user    ALL=NOPASSWD: /bin/umount
