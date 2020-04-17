@@ -31,7 +31,7 @@ build_pkg()
         if [ ! -d ${pkgname} ];then
             # pacman -Qq $pkgname > /dev/null 2>&1 && exit
             # wget http://aur.archlinux.org/packages/${pkgname:0:2}/${pkgname}/${pkgname}.tar.gz
-            wget -c http://aur.archlinux.org/cgit/aur.git/snapshot/${pkgname}.tar.gz
+            wget -c https://aur.archlinux.org/cgit/aur.git/snapshot/${pkgname}.tar.gz
             tar xvf ${pkgname}.tar.gz
         fi
         cd ${pkgname}
@@ -98,7 +98,9 @@ case $1 in
         clean_pkg $@
         ;;
     *)
-        build_pkg yaourt
+        #build_pkg yaourt
+        #build_pkg package-query
+        build_pkg aurman
         # build_pkg clipit
         # build_all
         # build_pkg qemu-git
