@@ -63,12 +63,12 @@ build_all()
 {
     # build_pkg clipit
     build_pkg cgvg
-    build_pkg apparix
-    build_pkg zeal-git
+    #build_pkg apparix
+    #build_pkg zeal-git
     build_pkg ttf-vlgothic
-    build_pkg package-query
-    build_pkg yaourt
-    build_pkg visual-studio-code-bin
+    #build_pkg package-query
+    #build_pkg yaourt
+    #build_pkg visual-studio-code-bin
     build_pkg ta-lib
     build_pkg mysql-utilities
     build_pkg grc
@@ -100,7 +100,7 @@ case $1 in
     *)
         #build_pkg yaourt
         #build_pkg package-query
-        build_pkg aurman
+        build_pkg yay
         # build_pkg clipit
         # build_all
         # build_pkg qemu-git
