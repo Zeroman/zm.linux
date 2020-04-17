@@ -2281,7 +2281,7 @@ install_archlinux_softs()
     add_soft squashfs-tools 
     add_soft lvm2
     add_soft net-tools
-    add_soft yaourt
+    add_soft yay
     # add_soft 
     # add_soft 
     zm_user_command zm_add_softs
@@ -2295,12 +2295,12 @@ install_archlinux_softs()
     if [ -n "$archlinux_aur_softs" -a "$(id -u)" != "0" ];then
         repo_dir=/work/cache/pacman/repo
         $SUDO touch ${repo_dir}/custom.db
-        yaourt -Syu
+        yay -Syu
 
         for soft in $archlinux_aur_softs
         do
             if ! pacman -Q $soft > /dev/null 2>&1;then
-                yaourt -S --noconfirm $soft
+                yay -S --noconfirm $soft
             fi
         done
     fi
