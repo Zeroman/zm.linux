@@ -764,6 +764,65 @@ init_lvm_partition()
     create_part work ${items['work']}
 }
 
+format_nvme_device()
+{
+    nvme_device=$1
+
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    if is_mounted $nvme_device;then 
+        err "$nvme_device is mounted!"
+    fi
+
+    print_disk_sizeinfo $nvme_device
+    echo "Format $nvme_device now?"
+    dialog_continue now
+
+    dd if=/dev/zero of=$nvme_device bs=512 count=63
+    sync;sleep 1;
+    blockdev --rereadpt $nvme_device
+
+    if $zm_efi;then
+        $SUDO parted -s -a optimal $nvme_device mklabel gpt
+    else
+        $SUDO parted -s -a optimal $nvme_device mklabel msdos
+    fi
+    $SUDO parted -s -a optimal $nvme_device mkpart primary fat32 0 256M
+    $SUDO parted -s -a optimal $nvme_device mkpart primary ext2 256M 20G
+    $SUDO parted -s -a optimal $nvme_device mkpart primary ext2 20G 100%
+    sync;sync;sync
+
+    sleep 3;
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    if is_mounted $nvme_device;then 
+        err "$nvme_device is mounted!"
+    fi
+
+    blockdev --rereadpt $nvme_device
+    #  sfdisk -l $nvme_device
+    part1_dev=${nvme_device}p1
+    part2_dev=${nvme_device}p2
+    test -b $part1_dev || err "no part $part1_dev"
+    test -b $part2_dev || err "no part $part2_dev"
+    dd if=/dev/zero of=$part1_dev bs=512 count=1
+    dd if=/dev/zero of=$part2_dev bs=512 count=1
+
+    mkfs.vfat -n udisk $part1_dev
+    mkfs.ext4 -L sfsroot_nvme $part2_dev
+    sync;sync;sync
+
+    sleep 3;
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    umount "$nvme_device"* > /dev/null 2>&1 || true
+    if is_mounted $nvme_device;then 
+        err "$nvme_device is mounted!"
+    fi
+}
+
 format_usb_device()
 {
     usb_device=$1
@@ -786,11 +845,11 @@ format_usb_device()
 
     if $zm_efi;then
         $SUDO parted -s -a optimal $usb_device mklabel gpt
-        $SUDO parted -s -a optimal $usb_device mkpart primary vfat 0% 50%
+        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 0% 50%
         $SUDO parted -s -a optimal $usb_device mkpart primary ext2 50% 100%
     else
         $SUDO parted -s -a optimal $usb_device mklabel msdos
-        $SUDO parted -s -a optimal $usb_device mkpart primary vfat 0% 50%
+        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 0% 50%
         $SUDO parted -s -a optimal $usb_device mkpart primary ext2 50% 100%
     fi
     sync;sync;sync
@@ -1486,27 +1545,37 @@ sfs2dir()
 
 update_grub_config()
 {
-    local grubdev="$1"
+    local grubdev=$zm_grub_dev
 
     if [ -z "$grubdev" ];then
         grubdev=$(mount | grep -w "$sfs_part_mpath" | awk '{print $1}')
     fi
 
+    local sfsrootdev="$grubdev"
+    if [ -n "$zm_sfsroot_dev" ];then
+        sfsrootdev="$zm_sfsroot_dev"
+    fi
+    test -b $grubdev || err "not exist grub dev: $grubdev"
+    test -b $sfsrootdev || err "not exist sfsroot dev: $sfsrootdev"
+
     local zm_name_param=$(cat /proc/cmdline | tr ' ' '\n' | grep zm_name || true)
     local grubroot="$(mktemp -d)"
-    local boot_uuid=$(blkid -s UUID $grubdev | awk -F= '{print $2}' | tr -d '"')
-    local temp_path=/linux/${zm_user}.${os_name}.${zm_arch}
+    local sfsrootdir="$(mktemp -d)"
+    local boot_uuid=$(blkid -s UUID $sfsrootdev | awk -F= '{print $2}' | tr -d '"')
+    local main_sfs_path=/linux/${zm_user}.${os_name}.${zm_arch}
     local os_class=${os_name/.*}
     local base_kernel_params="cgroup_enable=memory swapaccount=1 nmi_watchdog=0 $zm_name_param" #for docker
 
     mount_device $grubdev $grubroot
-    check_dir_exist "$grubroot/$temp_path"
+    mount_device $sfsrootdev $sfsrootdir
+    echo  $sfsrootdev $sfsrootdir
+    check_dir_exist "$sfsrootdir/$main_sfs_path"
     check_dir_exist "$grubroot/boot/grub/config"
     echo "
 menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class ${os_class} {
     set root_uuid=$boot_uuid
     search --no-floppy --fs-uuid --set=root \$root_uuid
-    set zm_dir=$temp_path
+    set zm_dir=$main_sfs_path
     echo 'Loading $zm_arch kernel...'
     linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params
     echo 'Loading $zm_arch initrd...'
@@ -1515,7 +1584,7 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
 }" > $grubroot/boot/grub/config/default.cfg
 
     local items=""
-    check_dir_exist "$grubroot/linux"
+    check_dir_exist "$sfsrootdir/linux"
     # sed "s/\bzm\b/$zm_user/g" $zm_workdir/common/linux.cfg > $grubroot/boot/grub/config/linux.cfg
     local linuxcfg=$grubroot/boot/grub/config/linux.cfg
     echo "" | $SUDO tee $linuxcfg > /dev/null
@@ -1526,14 +1595,14 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
     menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch} resure)' --class=submenu --class ${os_class} {
         set root_uuid=$boot_uuid
         search --no-floppy --fs-uuid --set=root \$root_uuid
-        set zm_dir=$temp_path
+        set zm_dir=$main_sfs_path
         echo 'Loading $zm_arch kernel...'
         linux \$zm_dir/${kernel_name} sfs_part=UUID=\$root_uuid $base_kernel_params $kernel_params nomodeset modprobe.blacklist=nouveau systemd.unit=rescue.target
         echo 'Loading $zm_arch initrd...'
         initrd \$zm_dir/${initrd_name}
     }
         " | $SUDO tee -a $linuxcfg > /dev/null
-        items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
+        items=$(cd $sfsrootdir/linux;find * -name root.sfs -exec dirname {} \; | grep old || true)
     if [ -n "$items" ];then
         echo "submenu 'zm linux (old) ->' --class=submenu --class ${os_class} {
         search --no-floppy -l --set=root sfsroot " | $SUDO tee -a $linuxcfg > /dev/null
@@ -1549,7 +1618,7 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
         done
         echo "}" | $SUDO tee -a $linuxcfg > /dev/null
     fi
-    items=$(cd $grubroot/linux;find * -name root.sfs -exec dirname {} \; | grep -v old || true)
+    items=$(cd $sfsrootdir/linux;find * -name root.sfs -exec dirname {} \; | grep -v old || true)
     for dir in $items
     do
         echo "
@@ -1562,7 +1631,9 @@ menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class 
     echo "}" | $SUDO tee -a $linuxcfg > /dev/null
 
     umount_device $grubroot
+    umount_device $sfsrootdir
     rmdir $grubroot
+    rmdir $sfsrootdir
 }
 
 gen_iso_system()
@@ -1584,7 +1655,9 @@ gen_usb_boot ()
     fi
     check_file_exist $grubdev
     install_grub $grubdev
-    update_grub_config $grubdev
+    zm_grub_dev=$grubdev
+    zm_sfsroot_dev=$grubdev
+    update_grub_config 
 }
 
 gen_usb_system()
@@ -1606,6 +1679,26 @@ gen_usb_system()
     install_system $usb_root_device 
 }
 
+install_to_nvme()
+{
+    nvme_device=$1
+    check_file_exist $nvme_device
+
+    nvme_efi_device=${nvme_device}p1
+    nvme_root_device=${nvme_device}p2
+    if [ ! -b ${nvme_root_device} ];then
+        format_nvme_device $nvme_device
+    fi
+    check_file_exist $nvme_efi_device
+    check_file_exist $nvme_root_device
+
+    install_system $nvme_root_device 
+    install_grub disk=$nvme_device:efi=$nvme_efi_device:root=$nvme_efi_device
+    zm_grub_dev=$nvme_efi_device 
+    zm_sfsroot_dev=$nvme_root_device
+    update_grub_config 
+}
+
 make_lvm_virtual_system()
 {
     local img_file=/tmp/lvm.qcow2
@@ -1619,7 +1712,9 @@ make_lvm_virtual_system()
     init_lvm_partition name=zm:parts=/dev/nbd${nbdindex}p1:sfsroot=10G:home=:backup=2G:swap=2G:union=2G:work=-
     install_system /dev/mapper/zm-sfsroot
     install_grub disk=/dev/nbd0:root=/dev/mapper/zm-sfsroot
-    update_grub_config /dev/mapper/zm-sfsroot
+    zm_grub_dev=/dev/mapper/zm-sfsroot
+    zm_sfsroot_dev=/dev/mapper/zm-sfsroot
+    update_grub_config
     $SUDO vgchange -an zm
     uninit_qemu_disk $nbdindex 
     $SUDO vgscan --cache
@@ -1765,7 +1860,9 @@ make_virtual_system()
         $SUDO mkfs.ext4 -L sfsroot /dev/nbd${nbdindex}p1
         install_system /dev/nbd${nbdindex}p1
         install_grub disk=/dev/nbd0:root=/dev/nbd${nbdindex}p1
-        update_grub_config /dev/nbd${nbdindex}p1
+        zm_grub_dev=/dev/nbd${nbdindex}p1
+        zm_sfsroot_dev=/dev/nbd${nbdindex}p1
+        update_grub_config 
         uninit_qemu_disk $nbdindex
         convert_qemu_img $orig_format $disk_format $sfsroot_qcow2_file $sfsroot_file
         nbdindex=$(expr $nbdindex + 1)
@@ -2090,7 +2187,7 @@ install_system()
         $SUDO rsync -avP --no-l -L $home_sfs_file.[0-9] $install_dir || true
     fi
 
-    $zm_path --install-zm $root_dir
+    #$zm_path --install-zm $root_dir
 
     sync;sync;sync
 
@@ -2281,7 +2378,7 @@ install_archlinux_softs()
     add_soft squashfs-tools 
     add_soft lvm2
     add_soft net-tools
-    add_soft yay
+    # add_soft yay
     # add_soft 
     # add_soft 
     zm_user_command zm_add_softs
@@ -2917,6 +3014,10 @@ zm_config()
                 ;;
             --skip-create-link) zm_argv_del $1;shift; zm_skip_create_link=true;
                 ;;
+            --grub-dev)  zm_argv_del $1;shift; zm_grub_dev="$1"; zm_argv_del $1;shift;
+                ;;
+            --sfsroot-dev)  zm_argv_del $1;shift; zm_sfsroot_dev="$1"; zm_argv_del $1;shift;
+                ;;
             --debug) zm_argv_del $1;shift; zm_debug=true;
                 ;;
             *) shift; 
@@ -3036,7 +3137,7 @@ zm_excute()
                 ;;
             --install-grub) shift; install_grub $@; exit 0; 
                 ;;
-            --update-grub-config) shift; update_grub_config $1; exit 0; 
+            --update-grub-config) shift; update_grub_config; exit 0; 
                 ;;
             --install-system) shift; install_system $1; test -z "$1" || shift; 
                 ;;
@@ -3057,6 +3158,8 @@ zm_excute()
             --gen-iso-system) shift; gen_iso_system $1; test -z "$1" || shift; 
                 ;;
             --gen-usb-system) shift; gen_usb_system $1; test -z "$1" || shift; 
+                ;;
+            --install-to-nvme) shift; install_to_nvme $1; test -z "$1" || shift; 
                 ;;
             --gen-usb-boot) shift; gen_usb_boot $1; test -z "$1" || shift;
                 ;;
@@ -3184,9 +3287,9 @@ zm_init()
     # no multimedia
     #src_url=http://mirrors.tuna.tsinghua.edu.cn
     # src_url=http://mirrors.163.com
-    #src_url=http://mirrors.aliyun.com
-    src_url=http://mirrors.cloud.tencent.com
-    # src_url=http://mirrors.sohu.com
+    src_url=http://mirrors.aliyun.com
+    #src_url=http://mirrors.cloud.tencent.com
+     #src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
     # have multimedia
@@ -3308,6 +3411,9 @@ zm_debug=false
 zm_efi=false
 zm_skip_backup_old=false
 zm_skip_create_link=false
+
+zm_grub_dev=''
+zm_sfsroot_dev=''
 
 export zm_debug
 
