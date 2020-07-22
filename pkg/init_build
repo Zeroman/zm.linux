@@ -101,6 +101,7 @@ case $1 in
         #build_pkg yaourt
         #build_pkg package-query
         build_pkg yay
+        #build_pkg nbfc-git
         # build_pkg clipit
         # build_all
         # build_pkg qemu-git
