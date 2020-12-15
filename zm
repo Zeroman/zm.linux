@@ -405,8 +405,9 @@ check_file_exist()
 check_dir_exist()
 {
     local "dir=$1"
+    local "msg=$2"
     test -z "$dir" && err "Please input check_dir_exist() param"
-    test -e "$dir" || err "Cann't find dir $dir."
+    test -e "$dir" || err "Cann't find dir $dir, $msg"
 }
 
 check_binary()
@@ -650,7 +651,7 @@ install_grub()
     install_grub_on_dir $root
     # $SUDO grub-mkdevicemap -m $root/boot/grub/device.map
 
-    if [ -b "$efi_part" ];then
+    if $zm_efi && [ -b "$efi_part" ];then
         log_info "install grub-efi on $efi_part"
         dialog_continue "Install grub-efi on $efi_part, root=$rootpart"
         mount_device $efi_part $efi_dir
@@ -661,8 +662,8 @@ install_grub()
     else
         local disk=$(readlink -f ${items['disk']})
         check_file_exist $disk
-        log_info "install grub on $disk"
-        dialog_continue "Install grub on $disk, root=$root"
+        log_info "install grub-bios on $disk"
+        dialog_continue "Install grub-bios on $disk, root=$root"
         $SUDO grub-install $disk --no-floppy --target=i386-pc --boot-directory=$root/boot --modules="${modules[*]}"
     fi
 
@@ -826,7 +827,7 @@ format_nvme_device()
 format_usb_device()
 {
     usb_device=$1
-    check_removeable_device $usb_device
+    #check_removeable_device $usb_device
 
     umount "$usb_device"* > /dev/null 2>&1 || true
     umount "$usb_device"* > /dev/null 2>&1 || true
@@ -836,8 +837,12 @@ format_usb_device()
     fi
 
     print_disk_sizeinfo $usb_device
-    echo "Format $usb_device now?"
-    dialog_continue now
+    if $zm_efi;then
+        msg="Format $usb_device to gpt-efi now?"
+    else
+        msg="Format $usb_device to ms-dos now?"
+    fi
+    dialog_continue "$msg" format
 
     dd if=/dev/zero of=$usb_device bs=512 count=63
     sync;sleep 1;
@@ -845,42 +850,70 @@ format_usb_device()
 
     if $zm_efi;then
         $SUDO parted -s -a optimal $usb_device mklabel gpt
-        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 0% 50%
-        $SUDO parted -s -a optimal $usb_device mkpart primary ext2 50% 100%
+        $SUDO parted -s -a optimal $usb_device mkpart primary 1M 3M
+        $SUDO parted -s -a optimal $usb_device set 1 bios_grub on
+        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 3M 260M
+        $SUDO parted -s -a optimal $usb_device set 2 legacy_boot on
+        $SUDO parted -s -a optimal $usb_device mkpart primary ext2 260M 10G
+        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 10G 100%
+        sync;sync;sync
+
+        sleep 3;
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        if is_mounted $usb_device;then 
+            err "$usb_device is mounted!"
+        fi
+
+        blockdev --rereadpt $usb_device
+        efi_dev=${usb_device}2
+        linux_dev=${usb_device}3
+        win_dev=${usb_device}4
+
+        mkfs.vfat -n EFI $efi_dev
+        mkfs.ext4 -L sfsroot_usb $linux_dev
+        sync;sync;sync
+        install_grub disk=$usb_device:root=$linux_dev
+        sync;sync;sync
+        zm_efi=false
+        install_grub disk=$usb_device:root=$linux_dev
+        sync;sync;sync
     else
         $SUDO parted -s -a optimal $usb_device mklabel msdos
-        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 0% 50%
-        $SUDO parted -s -a optimal $usb_device mkpart primary ext2 50% 100%
-    fi
-    sync;sync;sync
+        $SUDO parted -s -a optimal $usb_device mkpart primary fat32 0% 90%
+        $SUDO parted -s -a optimal $usb_device mkpart primary ext2 90% 100%
 
-    sleep 3;
-    umount "$usb_device"* > /dev/null 2>&1 || true
-    umount "$usb_device"* > /dev/null 2>&1 || true
-    umount "$usb_device"* > /dev/null 2>&1 || true
-    if is_mounted $usb_device;then 
-        err "$usb_device is mounted!"
-    fi
+        sync;sync;sync
 
-    blockdev --rereadpt $usb_device
-    #  sfdisk -l $usb_device
-    part1_dev=${usb_device}1
-    part2_dev=${usb_device}2
-    test -b $part1_dev || err "no part $part1_dev"
-    test -b $part2_dev || err "no part $part2_dev"
-    dd if=/dev/zero of=$part1_dev bs=512 count=1
-    dd if=/dev/zero of=$part2_dev bs=512 count=1
+        sleep 3;
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        if is_mounted $usb_device;then 
+            err "$usb_device is mounted!"
+        fi
 
-    mkfs.vfat -n udisk $part1_dev
-    mkfs.ext4 -L sfsroot_usb $part2_dev
-    sync;sync;sync
+        blockdev --rereadpt $usb_device
+        #  sfdisk -l $usb_device
+        part1_dev=${usb_device}1
+        part2_dev=${usb_device}2
+        test -b $part1_dev || err "no part $part1_dev"
+        test -b $part2_dev || err "no part $part2_dev"
+        dd if=/dev/zero of=$part1_dev bs=512 count=1
+        dd if=/dev/zero of=$part2_dev bs=512 count=1
 
-    sleep 3;
-    umount "$usb_device"* > /dev/null 2>&1 || true
-    umount "$usb_device"* > /dev/null 2>&1 || true
-    umount "$usb_device"* > /dev/null 2>&1 || true
-    if is_mounted $usb_device;then 
-        err "$usb_device is mounted!"
+        mkfs.vfat -n udisk $part1_dev
+        mkfs.ext4 -L sfsroot_usb $part2_dev
+        sync;sync;sync
+
+        sleep 3;
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        umount "$usb_device"* > /dev/null 2>&1 || true
+        if is_mounted $usb_device;then 
+            err "$usb_device is mounted!"
+        fi
     fi
 }
 
@@ -1569,8 +1602,8 @@ update_grub_config()
     mount_device $grubdev $grubroot
     mount_device $sfsrootdev $sfsrootdir
     echo  $sfsrootdev $sfsrootdir
-    check_dir_exist "$sfsrootdir/$main_sfs_path"
-    check_dir_exist "$grubroot/boot/grub/config"
+    check_dir_exist "$sfsrootdir/$main_sfs_path" 'use --grub-dev param'
+    check_dir_exist "$grubroot/boot/grub/config" 'use --grub-dev param'
     echo "
 menuentry 'ZM linux (${zm_user}.${os_name}.${zm_arch})' --class=submenu --class ${os_class} {
     set root_uuid=$boot_uuid
@@ -1654,9 +1687,9 @@ gen_usb_boot ()
         format_usb_device $usb_device
     fi
     check_file_exist $grubdev
-    install_grub $grubdev
     zm_grub_dev=$grubdev
     zm_sfsroot_dev=$grubdev
+    install_grub disk=$usb_device:root=$grubdev
     update_grub_config 
 }
 
@@ -3161,6 +3194,8 @@ zm_excute()
                 ;;
             --install-to-nvme) shift; install_to_nvme $1; test -z "$1" || shift; 
                 ;;
+            --format-usb) shift; format_usb_device $1; test -z "$1" || shift;
+                ;;
             --gen-usb-boot) shift; gen_usb_boot $1; test -z "$1" || shift;
                 ;;
             --download-softs) download_softs; shift;
@@ -3287,8 +3322,8 @@ zm_init()
     # no multimedia
     #src_url=http://mirrors.tuna.tsinghua.edu.cn
     # src_url=http://mirrors.163.com
-    src_url=http://mirrors.aliyun.com
-    #src_url=http://mirrors.cloud.tencent.com
+    #src_url=http://mirrors.aliyun.com
+    src_url=http://mirrors.cloud.tencent.com
      #src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
