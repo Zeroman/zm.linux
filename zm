@@ -276,7 +276,7 @@ usage ()
     add_help "--download-softs" "download all softs."
     add_help "-m, --make-system [output dir]" "make system"
     add_help "--setup" "setup system"
-    add_help "--no-lts-kernel" "not use lts kernel"
+    add_help "--lts-kernel" "use lts kernel"
     add_help "--kernel-name" "kernel name"
     add_help "--kernel-ver" "kernel ver"
     add_help "--zm-dir" "zm system dir"
@@ -1310,10 +1310,10 @@ get_kernel_file()
             fi
             ;;
         archlinux)
-            if [ "$lts_kernel" = "no" ];then
-                vmlinuz=$(readlink -f /boot/vmlinuz-linux)
-            else
+            if [ "$lts_kernel" = "yes" ];then
                 vmlinuz=$(readlink -f /boot/vmlinuz-linux-lts)
+            else
+                vmlinuz=$(readlink -f /boot/vmlinuz-linux)
             fi
             ;;
         *)
@@ -2152,7 +2152,10 @@ make_system()
         archlinux)
             make_archlinux_base_system
             cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
-            local base_softs="linux-lts file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng neovim diffutils networkmanager"
+            local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng neovim diffutils networkmanager "
+            if [ "$lts_kernel" = "yes" ];then
+                base_softs+="linux-lts "
+            fi
             cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm $base_softs;"
             ;;
         *)
@@ -3015,7 +3018,7 @@ zm_config()
                 ;;
             --kernel-ver) zm_argv_del $1;shift; kernel_ver=$1; zm_argv_del $1;shift; 
                 ;;
-            --no-lts-kernel) zm_argv_del $1;shift; lts_kernel="no"; 
+            --lts-kernel) zm_argv_del $1;shift; lts_kernel="yes";
                 ;;
             --zm-user) zm_argv_del $1;shift; zm_user=$1; zm_argv_del $1;shift;
                 ;;
@@ -3308,7 +3311,7 @@ zm_init()
     kernel_name="vmlinuz"
     kernel_ver=""
     kernel_params=""
-    lts_kernel="yes"
+    lts_kernel="no"
 
     os_name=$(show_os_name)
 
