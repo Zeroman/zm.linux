@@ -543,7 +543,7 @@ def add_all_options():
 
 
 def has_backup(name):
-    return True if get_backup(name) != None else False
+    return True if get_backup(name) is not None else False
 
 
 def get_backup(name):
@@ -621,7 +621,7 @@ def add_image_config(name="", path="", type="", parent=None, deps=()):
     if not os.path.exists(path) and parent == None:
         g_log.error("%s is not exist." % (path))
         return False
-    if parent != None and not has_backup(parent):
+    if parent is not None and not has_backup(parent):
         g_log.error("backup: parent %s is not exist." % (parent))
         return False
     for dep in deps:
@@ -766,7 +766,7 @@ def mksquashfs(dir, path, exclude=(), comp='lzo', other=()):
 def create_backup_cmd(arg):
     deps = ()
     temps = get_config(env.backup_deps, None)
-    if temps != None:
+    if temps is not None:
         deps = tuple(temps.split(','))
     parent = get_config(env.backup_parent, None)
     if os.path.exists(arg):
@@ -837,7 +837,7 @@ def create_backup(name='', dir="", parent=None, deps=()):
         if pimage[c.image_type] == c.dir:
             g_log.error("parent image can't be directory")
             return False
-        if name is '':
+        if name == '':
             name = pimage[c.name]
     if has_backup(name):
         remove_backup(name)
@@ -886,7 +886,7 @@ def mount_backup(name, mode='rw'):
 
     if ret:
         parent = image[c.parent]
-        if parent != None:
+        if parent is not None:
             ret = mount_backup(parent, mode='ro')
 
     if ret:
@@ -933,7 +933,7 @@ def umount_backup(name):
             g_images_dir[m_hash][c.by].remove(hash)
         save_mounted_config(mounted=True)
         ret = True
-    if parent != None:
+    if parent is not None:
         ret = umount_backup(parent)
     return ret
 
@@ -943,7 +943,7 @@ def run_option(o, p, t="config"):
     if opt[c.image_type] != t:
         return
     # print("%s = %s" % (o, p))
-    if p is '?':
+    if p == '?':
         print(o + ' help:')
         print("%s" % (opt['help']))
         show_map_1level(opt['values'], "  ")
@@ -1085,13 +1085,13 @@ def usage():
         key = ""
         sp = opt['sp']
         lp = opt['lp']
-        if sp is not "" and lp is not "":
+        if sp != "" and lp != "":
             key = '%s, %s' % (sp, lp)
-        elif sp is not "":
+        elif sp != "":
             key = sp
-        elif lp is not "":
+        elif lp != "":
             key = lp
-        if key is not "":
+        if key != "":
             map_help[key] = opt['help']
     show_map_1level(map_help, "  ")
     print("")
