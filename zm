@@ -2154,7 +2154,7 @@ make_system()
             cmd+="test -e /etc/pacman.d/gnupg/trustdb.gpg || { pacman-key --init; pacman-key --populate archlinux; };"
             local base_softs="file findutils gawk gettext grep gzip pacman sed sudo util-linux which procps-ng neovim diffutils networkmanager "
             if [ "$lts_kernel" = "yes" ];then
-                base_softs+="linux-lts "
+                base_softs+="linux-lts linux-lts-headers "
             fi
             cmd+="pacman -Suy --noconfirm;pacman -S --needed --noconfirm $base_softs;"
             ;;
@@ -2238,6 +2238,11 @@ install_system()
 add_soft()
 {	
     echo "$@" | $SUDO tee -a $soft_list_file > /dev/null
+}
+
+add_ignore_soft()
+{
+    _need_ignore_softs+=" $@"
 }
 
 add_aur_soft()
@@ -2380,6 +2385,14 @@ install_soft()
     esac
 }
 
+remove_ignore_softs()
+{
+    sed -e 's/\ /\n/g' -e '/^[  ]*$/d' -i $soft_list_file
+    for _ingore_soft in $_need_ignore_softs;do
+        sed -e "/^${ignore_soft}$/d" -i $soft_list_file
+    done
+}
+
 install_debian_softs()
 {
     print_env
@@ -2399,6 +2412,8 @@ install_debian_softs()
 
     $SUDO $APTGET autoremove || true
 }
+
+
 
 install_archlinux_softs()
 {
@@ -2423,6 +2438,7 @@ install_archlinux_softs()
         $SUDO pacman -Sq --needed --noconfirm archlinux-keyring
         touch /tmp/.pacman.update
     fi
+
     $SUDO pacman -Sq --needed --noconfirm $(cat $soft_list_file) 2>&1 | grep -v ^warning
 
     if [ -n "$archlinux_aur_softs" -a "$(id -u)" != "0" ];then
@@ -3104,6 +3120,7 @@ zm_config()
     root_dir=$build_dir/root
     dl_dir=$build_dir/dl
 
+    _need_ignore_softs=""
     soft_list_file=$build_dir/soft_list
 
     mkdir -p $mnt_dir
