@@ -145,7 +145,9 @@ check_device()
             checkfs $*
             ;;
         archlinux)
-            fsck_device $1
+            if [ -n "$1" ];then
+                fsck_device $1
+            fi
             ;;
     esac
 }
