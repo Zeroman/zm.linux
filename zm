@@ -2689,7 +2689,7 @@ zm_setup_default_locales()
     dpkg-reconfigure -u locales || true
 }
 
-zm_print_mount_backup_dir()
+zm_print_backup_mountdir()
 {
     if [ -z "$@" ];then
         return
@@ -2697,7 +2697,17 @@ zm_print_mount_backup_dir()
 
     bak_name="$1"
 
-    bak_root_dir=$backup_workdir/$bak_name
+    _sfs_mountdir=/media/sfs/$bak_name
+    if ! is_mounted $_sfs_mountdir;then
+        echo ""
+    fi
+
+    mount | grep lowerdir=$_sfs_mountdir | awk {'print $3}'
+}
+
+zm_print_backup_workdir()
+{
+    bak_root_dir=$(zm_print_backup_mountdir $1)
     bak_work_dir=$(readlink -e $work_mountdir/$bak_name)
     if [ "$bak_work_dir" = "$bak_root_dir" ];then
         echo $work_mountdir/$bak_name 
@@ -2708,19 +2718,23 @@ zm_print_mount_backup_dir()
 
 zm_mount_backup()
 {
-    if [ -z "$@" ];then
+    if [ -z "$1" ];then
         return
     fi
 
     bak_name="$1"
-    bak_root_dir=$backup_workdir/$bak_name
-    bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
+    mount_dir="$2"
 
     test -e $backup_mountdir/${bak_name}.sfs || return 1
 
-    if readlink -e $bak_root_dir > /dev/null 2>&1;then
-        $SUDO rmdir $bak_root_dir > /dev/null 2>&1 || true
+    bak_root_dir=$backup_workdir/$bak_name
+    bak_unionfs_dir=$backup_mountdir/unionfs/$bak_name
+
+    if [ -n "$mount_dir" ];then
+        bak_root_dir=$mount_dir
+        zm_skip_create_link=true
     fi
+
     if ! is_mounted $bak_root_dir;then
 
         $SUDO mkdir -m 700 -p $bak_root_dir
@@ -2955,53 +2969,45 @@ zm_remove_backup_branch()
 
 zm_umount_backup()
 {
-    bak_params=$1
+    bak_name=$1
+
     if [ -z "$1" ];then
-        bak_params='.'
+        bak_name='.'
+    fi
+    if [ -z $bak_name -o "$bak_name" = '..' ];then
+        echo "param error."
+        return 0
+    fi
+    if [ $bak_name = '.' ];then
+        bak_name=$(basename $(readlink -e $bak_name))
     fi
 
-    is_mounted $backup_mountdir || return
-
-    if [ ! -e $backup_workdir ];then
-        echo "zm backup dir is not exist."
-        return 1
+    mount_dir=$(zm_print_backup_mountdir $bak_name)
+    if [ -z "$mount_dir" ];then
+        err "$bak_name not mounted"
     fi
 
-    for bak_name in $bak_params
+    umount_storage $mount_dir
+
+    bak_zm_sfs_dir=$sfs_mpath/$bak_name
+    for branch in $(seq 1 $unionfs_max_branch)
     do
-
-        if [ -z $bak_name -o "$bak_name" = '..' ];then
-            echo "param error."
-            return 0
+        branch_sfs_mount_dir=${bak_zm_sfs_dir}.${branch}
+        if [ -d "$branch_sfs_mount_dir" ];then
+            umount_storage $branch_sfs_mount_dir
+            continue
         fi
+        break
+    done  
 
-        if [ $bak_name = '.' ];then
-            bak_name=$(basename $(readlink -e $bak_name))
-        fi
+    umount_storage $bak_zm_sfs_dir 
 
-        umount_storage $backup_workdir/$bak_name 
+    bak_work_dir=$(readlink -f $work_mountdir/$bak_name)
+    if [ "$bak_work_dir" = "$mount_dir" ];then
+        rm -vf $work_mountdir/$bak_name
+    fi
 
-        bak_zm_sfs_dir=$sfs_mpath/$bak_name
-        for branch in $(seq 1 $unionfs_max_branch)
-        do
-            branch_sfs_mount_dir=${bak_zm_sfs_dir}.${branch}
-            if [ -d "$branch_sfs_mount_dir" ];then
-                umount_storage $branch_sfs_mount_dir
-                continue
-            fi
-            break
-        done  
-
-        umount_storage $bak_zm_sfs_dir 
-
-        bak_work_dir=$(readlink -f $work_mountdir/$bak_name)
-        if [ "$bak_work_dir" = "$backup_workdir/$bak_name" ];then
-            rm -vf $work_mountdir/$bak_name
-        fi
-
-        # $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/
-
-    done
+    # $SUDO rmdir --ignore-fail-on-non-empty $bak_unionfs_dir/
 }
 
 
@@ -3414,22 +3420,27 @@ zm_uninit()
 
 zm_info()
 {
-    case "$1" in
+    cmd=$1
+    shift
+    case "$cmd" in
         --print-workdir)
             echo $zm_workdir
             exit 0
             ;;
         --print-backup-workdir)
-            shift
             if [ -z "$1" ];then
                 echo $backup_workdir
             else
-                zm_print_mount_backup_dir $1
+                zm_print_backup_workdir $1
             fi
             exit 0
             ;;
         --print-backup-mountdir)
-            echo $backup_mountdir
+            if [ -z "$1" ];then
+                echo $backup_mountdir
+            else
+                zm_print_backup_mountdir $1
+            fi
             exit 0
             ;;
         --print-os-name)
