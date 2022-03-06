@@ -3469,7 +3469,7 @@ fi
 
 zm_argv=$@
 zmargs_file="$PWD/.zmargs"
-if [ -e $zmargs_file ];then
+if [ -e "$zmargs_file" ];then
     zm_argv+=" $(cat $zmargs_file)"
 fi
 
