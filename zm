@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-zm_curdir=$PWD
+zm_curdir="$PWD"
 zm_path=$(readlink -f $0)
 zm_workdir=${zm_path%/*}
 
@@ -2016,12 +2016,12 @@ zm_sync_backup()
 {
     if [ $# = 1 ];then
         src_dir=/media/backup
-        dst_dir=$PWD
+        dst_dir="$PWD"
         name=$1
     fi
     if [ $# = 2 ];then
         src_dir=$1
-        dst_dir=$PWD
+        dst_dir="$PWD"
         name=$2
     fi
     if [ $# = 3 ];then
@@ -3468,8 +3468,9 @@ if [ $# -eq 0 -o "$1" = "--help" ];then
 fi
 
 zm_argv=$@
-if [ -e $PWD/.zmargs ];then
-    zm_argv+=" $(cat $PWD/.zmargs)"
+zmargs_file="$PWD/.zmargs"
+if [ -e $zmargs_file ];then
+    zm_argv+=" $(cat $zmargs_file)"
 fi
 
 zm_clean=true
