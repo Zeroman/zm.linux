@@ -126,6 +126,7 @@ goto_shell()
 {
     print_msg "$@"
     print_msg "Goto shell, and prees ctrl + d to continue."
+    print_msg "you can edit /tmp/env for env."
 
     case "$os_name" in
         debian)
@@ -136,6 +137,12 @@ goto_shell()
             launch_interactive_shell
             ;;
     esac
+
+    if [ -e /tmp/env ];then
+        while read line; do
+            export $line
+        done < /tmp/env
+    fi
 }
 
 check_device()
