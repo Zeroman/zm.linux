@@ -2107,6 +2107,23 @@ make_debian_base_system()
     sed -i "s/update_initramfs=yes/update_initramfs=no/g" $root_dir/etc/initramfs-tools/update-initramfs.conf
 }
 
+make_ubuntu_base_system()
+{
+    check_binary debootstrap
+
+    if [ ! -e "$root_dir/bin/sh" ];then
+        if [ -d $cache_dir/apt-archives ];then
+            mkdir -p $root_dir/var/cache/apt/archives
+            mount_device --bind $cache_dir/apt-archives $root_dir/var/cache/apt/archives
+        fi
+        local base_softs="aptitude,bash,rsync,dosfstools,initramfs-tools,systemd"
+        debootstrap --include=$base_softs --arch=$zm_arch ${os_name#*.} $root_dir $src_url/ubuntu
+        if [ -d $cache_dir/apt-archives ];then
+            umount_device $root_dir/var/cache/apt/archives
+        fi
+    fi
+}
+
 make_archlinux_base_system()
 {
     root_dir=$build_dir/root.$zm_arch
@@ -2148,6 +2165,9 @@ make_system()
     case "$os_name" in
         debian.*)
             make_debian_base_system
+            ;;
+        ubuntu.*)
+            make_ubuntu_base_system
             ;;
         archlinux)
             make_archlinux_base_system
@@ -3085,7 +3105,7 @@ zm_config()
 
     if [ -z "$zm_arch" ];then
         case "$os_name" in
-            debian.*)
+            debian.*|ubuntu.*)
                 # zm_arch=$(dpkg --print-architecture)
                 zm_arch="amd64"
                 ;;
