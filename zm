@@ -154,7 +154,11 @@ download_file()
     DL="wget -c"
 
     if [ -e "$dst" -a -n "$md5" ];then
-        echo "$md5 $dst" | md5sum -c 
+        if [ ${#md5} == 128 ];then
+            echo "$md5 $dst" | md5sum -c 
+        else
+            echo "$md5 $dst" | sha256sum -c 
+        fi
         if [ $? = 0 ];then
             return
         fi
@@ -173,7 +177,11 @@ download_file()
     fi
 
     if [ -n "$md5" ];then
-        echo "$md5 $dst" | md5sum -c 
+        if [ ${#md5} == 128 ];then
+            echo "$md5 $dst" | md5sum -c 
+        else
+            echo "$md5 $dst" | sha256sum -c 
+        fi
     fi
 }
 
@@ -2128,12 +2136,12 @@ make_archlinux_base_system()
 {
     root_dir=$build_dir/root.$zm_arch
     if [ ! -d "$root_dir" ];then
-        md5sum_file=$dl_dir/md5sums.txt
-        download_file $src_url/archlinux/iso/latest/md5sums.txt $md5sum_file.orig
-        grep bootstrap-20 $md5sum_file.orig > $md5sum_file
-        bootstrap_file=$(cat $md5sum_file | grep $zm_arch | awk '{print $2}')
-        bootstrap_md5=$(cat $md5sum_file | grep $zm_arch | awk '{print $1}')
-        download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_md5
+        sha256sum_file=$dl_dir/sha256sums.txt
+        download_file $src_url/archlinux/iso/latest/sha256sums.txt $sha256sum_file.orig
+        grep bootstrap-20 $sha256sum_file.orig > $sha256sum_file
+        bootstrap_file=$(cat $sha256sum_file | grep $zm_arch | awk '{print $2}')
+        bootstrap_sha256=$(cat $sha256sum_file | grep $zm_arch | awk '{print $1}')
+        download_file $src_url/archlinux/iso/latest/$bootstrap_file /work/cache/pacman/pkg/$bootstrap_file $bootstrap_sha256
         tar xf /work/cache/pacman/pkg/$bootstrap_file -C $build_dir/
     fi
 
@@ -3366,10 +3374,10 @@ zm_init()
     keep_build_dir="no"
 
     # no multimedia
-    src_url=http://mirrors.tuna.tsinghua.edu.cn
+    # src_url=http://mirrors.tuna.tsinghua.edu.cn
     # src_url=http://mirrors.163.com
     #src_url=http://mirrors.aliyun.com
-    #src_url=http://mirrors.cloud.tencent.com
+    src_url=http://mirrors.cloud.tencent.com
      #src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
