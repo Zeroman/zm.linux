@@ -8,6 +8,7 @@ cur_workdir=${cur_path%/*}
 
 build_dir=$cur_dir/build
 pkg_dir=$cur_dir/pkg
+pkg_suffix=tar.zst
 
 mkdir -p $build_dir $pkg_dir
 
@@ -15,13 +16,15 @@ build_pkg()
 {
     pkgname=$1
 
-    pkg_path=$(find $pkg_dir -name "${pkgname}*pkg.tar.[xg]z")
+    pkg_path=$(find $pkg_dir -name "${pkgname}*pkg.tar.${pkg_suffix}")
     if [ -e "$pkg_path" ];then
         echo "$pkg_path is exists."
         return
     fi
 
     cd $build_dir
+
+    export GOPROXY=https://goproxy.cn
 
     if [ "${pkgname:(-8)}" = "PKGBUILD" ];then
         wget $pkgname
@@ -39,8 +42,8 @@ build_pkg()
 
     makepkg --noconfirm -sf
     # makepkg --noconfirm -si $2
-    rm -fv $pkg_dir/${pkgname}*pkg.tar.[xg]z
-    cp -fv ${pkgname}*pkg.tar.[xg]z $pkg_dir/
+    rm -fv $pkg_dir/${pkgname}*pkg.tar.${pkg_suffix}
+    cp -fv ${pkgname}*pkg.${pkg_suffix} $pkg_dir/
 }
 
 update_custom_repo()
@@ -50,8 +53,8 @@ update_custom_repo()
         sudo mkdir -p $repo_dir
     fi
     sudo rm -fv $repo_dir/*
-    sudo cp -fv $pkg_dir/*.[xg]z $repo_dir/
-    sudo repo-add $repo_dir/custom.db.tar.gz $repo_dir/*.pkg.tar.[xg]z
+    sudo cp -fv $pkg_dir/*.${pkg_suffix} $repo_dir/
+    sudo repo-add $repo_dir/custom.db.tar.gz $repo_dir/*.pkg.tar.${pkg_suffix}
 }
 
 clean()

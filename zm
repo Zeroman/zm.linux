@@ -3376,9 +3376,9 @@ zm_init()
     # no multimedia
     # src_url=http://mirrors.tuna.tsinghua.edu.cn
     # src_url=http://mirrors.163.com
-    #src_url=http://mirrors.aliyun.com
+    # src_url=http://mirrors.aliyun.com
     src_url=http://mirrors.cloud.tencent.com
-     #src_url=http://mirrors.sohu.com
+    # src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
     # have multimedia
