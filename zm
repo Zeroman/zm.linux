@@ -2449,8 +2449,6 @@ install_archlinux_softs()
     add_soft autoconf automake binutils
     add_soft bison fakeroot flex libtool groff
     add_soft make m4 patch pkg-config texinfo
-    # add_soft gcc-multilib gcc-libs-multilib
-    # add_soft multilib-devel
     add_soft systemd-sysvcompat 
     add_soft openssh wget dosfstools 
     add_soft linux man
@@ -2458,7 +2456,6 @@ install_archlinux_softs()
     add_soft lvm2
     add_soft net-tools
     # add_soft yay
-    # add_soft 
     # add_soft 
     zm_user_command zm_add_softs
     if [ ! -e /tmp/.pacman.update ];then
@@ -3375,9 +3372,9 @@ zm_init()
 
     # no multimedia
     # src_url=http://mirrors.tuna.tsinghua.edu.cn
-    # src_url=http://mirrors.163.com
+    src_url=http://mirrors.163.com
     # src_url=http://mirrors.aliyun.com
-    src_url=http://mirrors.cloud.tencent.com
+    # src_url=http://mirrors.cloud.tencent.com
     # src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
