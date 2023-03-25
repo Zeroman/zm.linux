@@ -1607,6 +1607,11 @@ update_grub_config()
     local os_class=${os_name/.*}
     local base_kernel_params="cgroup_enable=memory swapaccount=1 nmi_watchdog=0 $zm_name_param" #for docker
 
+    if lsmod | grep amdgpu > /dev/null;then
+        # resolve amd gpu radeontop Shader Clock too high, and it is better to delete picom.
+        base_kernel_params+=" amdgpu.ppfeaturemask=0xffffffff"
+    fi
+
     mount_device $grubdev $grubroot
     mount_device $sfsrootdev $sfsrootdir
     echo  $sfsrootdev $sfsrootdir
