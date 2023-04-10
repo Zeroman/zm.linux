@@ -906,6 +906,10 @@ format_usb_device()
         #  sfdisk -l $usb_device
         part1_dev=${usb_device}1
         part2_dev=${usb_device}2
+        if echo $usb_device | grep nvme > /dev/null;then
+            part1_dev=${usb_device}p1
+            part2_dev=${usb_device}p2
+        fi
         test -b $part1_dev || err "no part $part1_dev"
         test -b $part2_dev || err "no part $part2_dev"
         dd if=/dev/zero of=$part1_dev bs=512 count=1
@@ -3377,9 +3381,9 @@ zm_init()
 
     # no multimedia
     # src_url=http://mirrors.tuna.tsinghua.edu.cn
-    src_url=http://mirrors.163.com
+    #src_url=http://mirrors.163.com
     # src_url=http://mirrors.aliyun.com
-    # src_url=http://mirrors.cloud.tencent.com
+    src_url=http://mirrors.cloud.tencent.com
     # src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
