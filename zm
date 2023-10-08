@@ -1609,7 +1609,7 @@ update_grub_config()
     local boot_uuid=$(blkid -s UUID $sfsrootdev | awk -F= '{print $2}' | tr -d '"')
     local main_sfs_path=/linux/${zm_user}.${os_name}.${zm_arch}
     local os_class=${os_name/.*}
-    local base_kernel_params="cgroup_enable=memory swapaccount=1 nmi_watchdog=0 $zm_name_param" #for docker
+    local base_kernel_params="cgroup_enable=memory swapaccount=1 nmi_watchdog=0 overlay.metacopy=off overlay.redirect_dir=off $zm_name_param" #for docker
 
     if lsmod | grep amdgpu > /dev/null;then
         # resolve amd gpu radeontop Shader Clock too high, and it is better to delete picom.
