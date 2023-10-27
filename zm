@@ -1485,10 +1485,10 @@ update_system()
 
     if [ -z "$sels" ];then
         local options=""
-        options+='"kernel" "update kernel" "off" '
-        options+='"initrd" "update initrd" "off" '
+        options+='"kernel" "update kernel" "on" '
+        options+='"initrd" "update initrd" "on" '
         options+='"root" "update root filesystem" "off" '
-        options+='"home" "update home filesystem" "on" '
+        options+='"home" "update home filesystem" "off" '
         sels=$(dialog_checklist "Update system" "Select update item:" $options)
         if [ -z "$sels" ];then
             return
