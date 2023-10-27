@@ -2643,6 +2643,19 @@ uninstall_zm()
     rm_safe $_root_dir/etc/bash_completion.d/zm
 }
 
+run_with_qemu()
+{
+    base_sets="-enable-kvm -rtc base=localtime -cpu host -m 4G -nodefaults"
+    system_sets="-initrd $zm_dir/initrd.img -kernel $zm_dir/vmlinuz"
+    #vnc_sets="-vnc :5900 -vga std"
+    vnc_sets=""
+    if [ -n "$vnc_sets" ];then
+        echo "vncviewer 127.0.0.1:5900"
+    fi
+    serial_sets='-nographic -serial mon:stdio' # -serial pty
+    qemu-system-x86_64 $base_sets $system_sets $vnc_sets $serial_sets -append "console=ttyS0 zm_debug" 
+}
+
 run_zm_debconf()
 {
     run_file=$1
@@ -3274,6 +3287,8 @@ zm_excute()
             --install-zm) shift; install_zm $1; test -z "$1" || shift
                 ;;
             --uninstall-zm) shift; uninstall_zm $1; test -z "$1" || shift
+                ;;
+            --run-with-qemu) shift; run_with_qemu $@; exit 0;
                 ;;
             --edit|-e) $EDITOR $zm_path; exit 0;
                 ;;
