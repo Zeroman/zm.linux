@@ -2647,13 +2647,42 @@ run_with_qemu()
 {
     base_sets="-enable-kvm -rtc base=localtime -cpu host -m 4G -nodefaults"
     system_sets="-initrd $zm_dir/initrd.img -kernel $zm_dir/vmlinuz"
+    kernel_append="console=ttyS0 zm_debug"
     #vnc_sets="-vnc :5900 -vga std"
     vnc_sets=""
     if [ -n "$vnc_sets" ];then
         echo "vncviewer 127.0.0.1:5900"
     fi
+    if [ -e $zm_dir/root.sfs ];then
+        system_sets+=" -hda $zm_dir/root.sfs"
+        kernel_append+=" root_sfs_part=/dev/sda"
+    fi
+    if [ -e $zm_dir/home.sfs ];then
+        system_sets+=" -hdb $zm_dir/home.sfs"
+        kernel_append+=" home_sfs_part=/dev/sdb"
+    fi
+    if [ -e $zm_dir/work.qcow2 ];then
+        system_sets+=" -hdc $zm_dir/work.qcow2"
+    fi
     serial_sets='-nographic -serial mon:stdio' # -serial pty
-    qemu-system-x86_64 $base_sets $system_sets $vnc_sets $serial_sets -append "console=ttyS0 zm_debug" 
+    qemu-system-x86_64 $base_sets $system_sets $vnc_sets $serial_sets -append "$kernel_append"
+}
+
+create_work_qcow2()
+{
+    img_path="$zm_dir/work.qcow2"
+    if [ -e "$img_path" ];then
+        echo "work.qcow2 exist"
+        return
+    fi
+    index=1
+    $SUDO rmmod nbd || true
+    $SUDO modprobe nbd max_part=16
+    nbd_path=/dev/nbd${index}
+    sudo qemu-img create -f qcow2 "$img_path" 10G
+    sudo qemu-nbd --format=qcow2 --cache=writeback -c "$nbd_path" $img_path
+    sudo mkfs.ext4 -L work "$nbd_path"
+    sudo qemu-nbd -v -d "$nbd_path"
 }
 
 run_zm_debconf()
@@ -3288,6 +3317,8 @@ zm_excute()
                 ;;
             --uninstall-zm) shift; uninstall_zm $1; test -z "$1" || shift
                 ;;
+            --create-work-qcow2) shift; create_work_qcow2; shift
+                ;;
             --run-with-qemu) shift; run_with_qemu $@; exit 0;
                 ;;
             --edit|-e) $EDITOR $zm_path; exit 0;
@@ -3396,10 +3427,10 @@ zm_init()
     keep_build_dir="no"
 
     # no multimedia
-    # src_url=http://mirrors.tuna.tsinghua.edu.cn
+    src_url=http://mirrors.tuna.tsinghua.edu.cn
     #src_url=http://mirrors.163.com
     # src_url=http://mirrors.aliyun.com
-    src_url=http://mirrors.cloud.tencent.com
+    #src_url=http://mirrors.cloud.tencent.com
     # src_url=http://mirrors.sohu.com
     # src_url=http://mirror.bit.edu.cn
 
