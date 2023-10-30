@@ -27,7 +27,7 @@ _setup_locale()
 
 _setup_docker()
 {
-    #_disable_service docker
+    _disable_service docker
     $SUDO rm -rf /var/lib/docker
     $SUDO ln -s /work/docker/data /var/lib/docker
     #graph_opt='--graph /work/docker/data -s overlay2'
@@ -43,6 +43,7 @@ _setup_docker()
 }
 ' > $zm_user_home/.docker/config.json
     #$SUDO systemctl restart docker || true
+    $SUDO systemctl enable docker || true
 }
 
 zm_setup()
