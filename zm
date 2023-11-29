@@ -2679,7 +2679,7 @@ create_work_qcow2()
     $SUDO rmmod nbd || true
     $SUDO modprobe nbd max_part=16
     nbd_path=/dev/nbd${index}
-    sudo qemu-img create -f qcow2 "$img_path" 10G
+    sudo qemu-img create -f qcow2 "$img_path" 80G
     sudo qemu-nbd --format=qcow2 --cache=writeback -c "$nbd_path" $img_path
     sudo mkfs.ext4 -L work "$nbd_path"
     sudo qemu-nbd -v -d "$nbd_path"
