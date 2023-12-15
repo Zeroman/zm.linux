@@ -2682,6 +2682,10 @@ create_work_qcow2()
     sudo qemu-img create -f qcow2 "$img_path" 80G
     sudo qemu-nbd --format=qcow2 --cache=writeback -c "$nbd_path" $img_path
     sudo mkfs.ext4 -L work "$nbd_path"
+    work_mount_temp_dir=$(mktemp -d)
+    sudo mount $nbd_path $work_mount_temp_dir
+    sudo mkdir -p $work_mount_temp_dir/docker/data
+    sudo umount $nbd_path
     sudo qemu-nbd -v -d "$nbd_path"
 }
 
