@@ -2312,10 +2312,10 @@ default_zm_setup_apt()
     if [ "$deb_ver" != "unstable" ];then
         echo "deb $src_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
         echo "deb $src_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
-        echo "deb $src_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb $src_url/debian-security/ $deb_ver-security main non-free contrib" >> $temp_apt_src_file
         echo "deb-src $src_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
         echo "deb-src $src_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $src_url/debian-security/ $deb_ver/updates main non-free contrib" >> $temp_apt_src_file
+        echo "deb-src $src_url/debian-security/ $deb_ver-security main non-free contrib" >> $temp_apt_src_file
     fi
     if ! diff $temp_apt_src_file /etc/apt/sources.list > /dev/null 2>&1;then
         mv $temp_apt_src_file /etc/apt/sources.list
@@ -3431,7 +3431,7 @@ zm_init()
     keep_build_dir="no"
 
     # no multimedia
-    src_url=http://mirrors.tuna.tsinghua.edu.cn
+    # src_url=http://mirrors.tuna.tsinghua.edu.cn
     #src_url=http://mirrors.163.com
     # src_url=http://mirrors.aliyun.com
     #src_url=http://mirrors.cloud.tencent.com
@@ -3440,7 +3440,7 @@ zm_init()
 
     # have multimedia
     # src_url=http://free.nchc.org.tw
-    # src_url=http://mirrors.ustc.edu.cn
+    src_url=https://mirrors.ustc.edu.cn
     # src_url=http://ftp.hk.debian.org
     # src_url=http://mirrors.xmu.edu.cn
     # src_url=http://mirror.bjtu.edu.cn
