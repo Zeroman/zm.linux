@@ -30,14 +30,14 @@ _add_softs_common()
 
     add_soft dpkg-dev
 
-    add_soft alsa-base alsa-utils alsa-tools
+    add_soft alsa-utils alsa-tools
     add_soft pulseaudio
 
     add_soft firmware-linux-free firmware-linux-nonfree 
     add_soft firmware-atheros firmware-brcm80211 firmware-realtek firmware-zd1211 firmware-misc-nonfree
     add_soft cpufrequtils fbset usbutils
     add_soft upower lm-sensors 
-    add_soft libva1
+    add_soft libva2
     add_soft acpi-support acpi
 
     add_soft sendemail sendip
@@ -64,7 +64,7 @@ _add_softs_common()
 
     add_soft gimp
     add_soft mypaint
-    add_soft lsb-release gksu
+    add_soft lsb-release
     add_soft imagemagick feh gpicview geeqie #pinta
     add_soft terminator mate-terminal #sakura
     add_soft network-manager network-manager-gnome gnome-keyring
@@ -87,7 +87,7 @@ _add_softs_common()
     add_soft mtd-utils 
     add_soft u-boot-tools
     add_soft astyle indent highlight source-highlight
-    add_soft valgrind mutextrace 
+    add_soft valgrind
     add_soft splint splint-data
     add_soft sloccount
     add_soft gcc g++ gdb gdbserver
@@ -98,14 +98,14 @@ _add_softs_common()
     add_soft ccache
     # add_soft avahi-daemon distcc 
     add_soft expect
-    add_soft dos2unix exfat-utils
+    add_soft dos2unix exfatprogs
     add_soft graphviz dot2tex xdot asymptote
     add_soft grc
 
     add_soft csstidy curl 
 
     add_soft meld dirdiff 
-    add_soft evince-gtk poppler-data apvlv impressive
+    add_soft evince poppler-data apvlv impressive
     add_soft netpbm gv plotutils # for umlgraph
 
     add_soft parallel
@@ -118,7 +118,7 @@ _add_softs_common()
     add_soft ttf-bitstream-vera 
     add_soft fonts-arphic-ukai fonts-arphic-uming
     add_soft fonts-arphic-bkai00mp fonts-arphic-bsmi00lp fonts-arphic-gbsn00lp fonts-arphic-gkai00mp 
-    add_soft fonts-droid
+    add_soft fonts-droid-fallback
 
     add_soft txt2tags html2text wv tidy
     add_soft doxygen-gui doxygen-latex docbook 
@@ -143,21 +143,21 @@ _add_softs_common()
 
     add_soft gparted xfsprogs reiserfsprogs reiser4progs jfsutils dmraid parted libparted-dev libparted-i18n
 
-    add_soft realpath rsync
+    add_soft rsync
     # add_soft mplayer mencoder
     add_soft mpg123 mp3rename
-    add_soft sqlite
+    add_soft sqlite3
     add_soft sqlitebrowser
     add_soft strace ltrace lsof lshw
 
-    add_soft python python-doc python-dev pylint
-    add_soft python-imaging python-paramiko python-serial 
-    add_soft python-openssl libnss3-tools
-    add_soft python-requests
-    add_soft python-pip python3-pip
-    add_soft python-tk python3-tk
-    add_soft python-gevent #for goagent
-    add_soft python-pygments python3-pygments
+    add_soft python3 python3-doc python3-dev pylint
+    add_soft python3-paramiko python3-serial 
+    add_soft python3-openssl libnss3-tools
+    add_soft python3-requests
+    add_soft python3-pip
+    add_soft python3-tk
+    add_soft python3-gevent #for goagent
+    add_soft python3-pygments
 
     add_soft ruby
 
@@ -182,15 +182,15 @@ _add_softs_common()
 
     # add_soft virtualbox virtualbox-qt virtualbox-dkms virtualbox-guest-additions-iso
 
-    add_soft qemu qemu-kvm rdesktop spice-client-gtk
-    add_soft bridge-utils libvirt-bin uml-utilities
+    add_soft qemu-utils qemu-kvm rdesktop spice-client-gtk aqemu
+    add_soft bridge-utils
     add_soft clang libclang-dev
 
     # for compile objc
     # add_soft gobjc gobjc++ gnustep libgnustep-base-dev gnustep-make
 
     #for mono develop
-    add_soft mono-complete monodevelop mono-xsp 
+    #add_soft mono-complete monodevelop mono-xsp 
 
     #for windows xrdp
     # add_soft xrdp
@@ -199,7 +199,7 @@ _add_softs_common()
     # for godot
     add_soft libssl-dev libasound2-dev
 
-    add_soft libgl1-mesa-dri libglapi-mesa libgles1-mesa libgles2-mesa libglu1-mesa
+    add_soft libgl1-mesa-dri libglapi-mesa libgles1 libgles2-mesa libglu1-mesa
     add_soft mesa-utils mesa-utils-extra    #for glxinfo
 
     # for cocos2d-x
@@ -239,8 +239,8 @@ _add_softs_i386_stable()
 _add_softs_common_stable() 
 {
     echo ""
-    add_soft libstdc++-4.9-doc
-    add_soft libstdc++6-4.9-dbg
+    add_soft libstdc++-12-doc
+    add_soft libstdc++6-12-dbg
 
     # add_soft rapidsvn
     # add_soft audacity
@@ -297,13 +297,13 @@ _add_softs_gui()
 
     add_soft compton
     add_soft openbox
-    add_soft obmenu obconf python-xdg
-    add_soft geany gsimplecal grun leafpad gucharmap
+    add_soft obconf python3-xdg
+    add_soft geany gsimplecal grun l3afpad gucharmap
     # add_soft human-icon-theme 
 
     add_soft fcitx fcitx-m17n fcitx-pinyin fcitx-module-cloudpinyin fcitx-config-gtk fcitx-ui-light fcitx-ui-classic
-    add_soft fcitx-frontend-all fcitx-frontend-gtk2 fcitx-frontend-gtk3 fcitx-frontend-qt4 fcitx-frontend-qt5
-    # add_soft ibus-gtk ibus-gtk3 ibus-qt4 sunpinyin-data ibus-sunpinyin
+    add_soft fcitx-frontend-all fcitx-frontend-gtk2 fcitx-frontend-gtk3 fcitx-frontend-qt5 fcitx-frontend-qt5
+    # add_soft ibus-gtk ibus-gtk3 ibus-qt5 sunpinyin-data ibus-sunpinyin
     add_soft im-config
 
     # add_soft synaptic
@@ -315,7 +315,7 @@ _add_softs_gui()
     add_soft lxpanel lxtask lxappearance clipit
     add_soft arandr lxrandr
     add_soft oxygencursors
-    add_soft gtk2-engines gtk2-engines-murrine gtk2-engines-wonderland
+    add_soft gtk2-engines gtk2-engines-murrine
     add_soft pcmanfm gvfs-backends gvfs-fuse
     # add_soft planner
 
@@ -323,9 +323,8 @@ _add_softs_gui()
     # add_soft xfce4-sensors-plugin xfce4-battery-plugin
     # add_soft thunar thunar-volman thunar-archive-plugin 
 
-    # add_soft chromium 
-    add_soft iceweasel iceweasel-l10n-zh-cn
-    add_soft xul-ext-adblock-plus xul-ext-flashblock xul-ext-downthemall xul-ext-foxyproxy-standard xul-ext-video-without-flash
+    add_soft chromium 
+    # add_soft iceweasel iceweasel-l10n-zh-cn
     # add_soft iceweasel-vimperator 
     # add_soft openfetion pidgin
     # add_soft google-chrome-stable #google-chrome-beta
@@ -335,12 +334,12 @@ _add_softs_gui()
     add_soft xtrlock
     add_soft xbindkeys xbindkeys-config
     add_soft autokey-gtk
-    add_soft gtk-recordmydesktop
+    add_soft recordmydesktop
     add_soft gnome-system-log gnome-disk-utility gnome-system-tools
     add_soft gnome-screenshot #shutter
     add_soft gtg #gnome task 
 
-    add_soft vim-gtk 
+    add_soft vim-gtk3
     add_soft devhelp
     # add_soft fontforge
 
@@ -348,22 +347,20 @@ _add_softs_gui()
     add_soft libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-l10n-zh-cn
 
     add_soft qtchooser
-    add_soft qt4-default 
-    #add_soft qt5-default
-    add_soft libqt4-dev qt4-dev-tools
-    add_soft libqt4-sql-sqlite libqtwebkit4 python-qt4 libqt4-opengl-dev 
-    add_soft qt4-designer
-    add_soft qtbase5-dev qt5-qmake qtbase5-dev-tools libqt5opengl5-dev libqt5sql5-sqlite python-pyqt5
+    #add_soft libqt5-dev qt5-dev-tools
+    #add_soft libqt5-sql-sqlite libqtwebkit4 python-qt5 libqt5-opengl-dev 
+    #add_soft qt5-designer
+    add_soft qtbase5-dev qt5-qmake qtbase5-dev-tools libqt5opengl5-dev libqt5sql5-sqlite python3-pyqt5
     add_soft qtcreator 
-    # add_soft qt4-doc qt5-doc
-    # add_soft qt4-demos 
+    # add_soft qt5-doc qt5-doc
+    # add_soft qt5-demos 
 
-    add_soft khelpcenter4 #for all man,info...
+    add_soft khelpcenter #for all man,info...
     add_soft filezilla # graphical ftp client
 
     # for mind map
     #add_soft vym
-    add_soft corkscrew polipo redsocks
+    add_soft corkscrew redsocks
 }
 
 

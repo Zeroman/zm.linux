@@ -2346,21 +2346,22 @@ add_debian_base_softs()
     add_soft aptitude lsof
     add_soft acpi-support acpi
     add_soft hdparm usbutils lshw 
-    add_soft dosfstools exfat-utils ntfs-3g busybox mbr 
+    add_soft dosfstools ntfs-3g busybox mbr exfatprogs
     add_soft rsync util-linux gpart debootstrap pciutils 
     add_soft systemd
     add_soft e2fsprogs
     add_soft lftp less bc
     add_soft ssh openssh-server nfs-common 
     add_soft vim gzip xz-utils 
-    add_soft netcat network-manager 
+    add_soft netcat-openbsd network-manager
     add_soft dh-make
     add_soft qemu-guest-agent
     add_soft apt-file
     # pigz lzip plzip pxz p7zip-full
 
     add_soft parted lvm2 initramfs-tools lsb-release genisoimage
-    add_soft squashfs-tools aufs-tools 
+    add_soft squashfs-tools
+    add_soft coreutils
 }
 
 
