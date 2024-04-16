@@ -470,19 +470,6 @@ _setup_samba()
     fi
 }
 
-_setup_flash()
-{
-    #dpkg-reconfigure flashplugin-nonfree
-
-    if [ ! -e /usr/lib/flashplugin-nonfree/libflashplayer.so ];then
-        $APTGET install flashplugin-nonfree
-        update-flashplugin-nonfree --install
-    fi
-
-    # $APTGET install pepperflashplugin-nonfree #for chromium
-    # update-pepperflashplugin-nonfree --install
-}
-
 _setup_google_chrome()
 {
     if dpkg-query -f '${db:Status-Status}\n' -W google-chrome-stable 2>&1 | grep ^installed > /dev/null 2>&1;then
@@ -555,7 +542,6 @@ zm_setup()
     _setup_service
     _setup_host
     _setup_network
-    _setup_flash
     _setup_google_chrome
     _setup_virtualbox
     _setup_docker
