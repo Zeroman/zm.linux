@@ -2307,16 +2307,12 @@ default_zm_setup_apt()
     local deb_ver=${os_name#*.}
     temp_apt_src_file=$build_dir/sources.list
     > $temp_apt_src_file
-    echo "deb $src_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
-    echo "deb-src $src_url/debian $deb_ver main non-free contrib" >> $temp_apt_src_file
-    if [ "$deb_ver" != "unstable" ];then
-        echo "deb $src_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
-        echo "deb $src_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
-        echo "deb $src_url/debian-security/ $deb_ver-security main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $src_url/debian $deb_ver-updates main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $src_url/debian $deb_ver-backports main non-free contrib" >> $temp_apt_src_file
-        echo "deb-src $src_url/debian-security/ $deb_ver-security main non-free contrib" >> $temp_apt_src_file
-    fi
+    echo "deb $src_url/debian $deb_ver main contrib non-free non-free-firmware" >> $temp_apt_src_file
+    echo "deb-src $src_url/debian $deb_ver main contrib non-free non-free-firmware" >> $temp_apt_src_file
+    echo "deb $src_url/debian $deb_ver-updates main contrib non-free non-free-firmware" >> $temp_apt_src_file
+    echo "deb $src_url/debian-security/ $deb_ver-security main non-free contrib" >> $temp_apt_src_file
+    #echo "deb $src_url/deb-multimedia/ $deb_ver main non-free" >> $temp_apt_src_file
+    #echo "deb $src_url/deb-multimedia/ $deb_ver-backports main" >> $temp_apt_src_file
     if ! diff $temp_apt_src_file /etc/apt/sources.list > /dev/null 2>&1;then
         mv $temp_apt_src_file /etc/apt/sources.list
     fi
