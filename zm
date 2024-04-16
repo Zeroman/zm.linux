@@ -2644,7 +2644,7 @@ run_with_qemu()
 {
     base_sets="-enable-kvm -rtc base=localtime -cpu host -m 4G -nodefaults"
     system_sets="-initrd $zm_dir/initrd.img -kernel $zm_dir/vmlinuz"
-    kernel_append="console=ttyS0 zm_debug"
+    kernel_append="console=ttyS0 debug"
     #vnc_sets="-vnc :5900 -vga std"
     vnc_sets=""
     if [ -n "$vnc_sets" ];then
