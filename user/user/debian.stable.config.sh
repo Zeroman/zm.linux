@@ -404,27 +404,6 @@ ___zm_setup_apt()
     $APTGET update
 }
 
-_setup_user()
-{
-    if ! grep 8888 /etc/group > /dev/null;then
-        groupadd -g 8888 $zm_user 
-        useradd -m -s /bin/bash -u 8888 -g 8888 $zm_user
-        # useradd -m -s /bin/zsh -u 8888 -g 8888 $zm_user
-        echo $zm_user:'afj;' | chpasswd
-        echo root:'afj;' | chpasswd
-        zm_add_groups floppy disk dialout audio video plugdev netdev sudo kvm docker vboxusers bumblebee
-        echo "
-        $zm_user    ALL=NOPASSWD: /bin/mount
-        $zm_user    ALL=NOPASSWD: /bin/umount
-        " > /dev/null
-        # " > /etc/sudoers.d/$zm_user.mount
-    fi
-    if [ -e /work ];then
-        chown $zm_user:$zm_user /work #-R    
-        chown $zm_user:$zm_user $(cat /etc/passwd | grep $zm_user | awk -F: '{print $6}') #-R
-    fi
-}
-
 _setup_docker()
 {
     $SUDO sed -i 's@#DOCKER_OPTS=.*@DOCKER_OPTS="--graph=/work/docker/data"@g' /etc/default/docker
@@ -448,7 +427,6 @@ _setup_service()
     # _setup_nfs
     # _setup_tftpd
     $SUDO systemctl disable cron.service || true
-    $SUDO systemctl disable redsocks || true
     # systemctl disable inetd.service || true
     # rcconf --off openbsd-inetd || true
 
@@ -470,63 +448,6 @@ _setup_samba()
     fi
 }
 
-_setup_google_chrome()
-{
-    if dpkg-query -f '${db:Status-Status}\n' -W google-chrome-stable 2>&1 | grep ^installed > /dev/null 2>&1;then
-        return
-    fi
-
-    if [ -e /work/cache/download/chrome/google-chrome-stable_current_${zm_arch}.deb ];then
-        $SUDO touch /etc/default/google-chrome
-        dpkg -i /work/cache/download/chrome/google-chrome-stable_current_${zm_arch}.deb || true
-        $APTGET -f install
-        # rm -f /etc/apt/sources.list.d/google-chrome.list
-    fi
-}
-
-_setup_virtualbox()
-{
-    local kernel_ver=$(get_kernel_ver)
-    local cur_kernel_ver=$(uname -r)
-
-	_new_install_vbox() 
-{
-    local pkgname="virtualbox-5.0"
-    if is_installed $pkgname;then
-        return
-    fi
-
-    echo "deb http://download.virtualbox.org/virtualbox/debian jessie contrib" \
-        | $SUDO tee /etc/apt/sources.list.d/virtualbox.list > /dev/null
-    wget -q https://www.virtualbox.org/download/oracle_vbox.asc -O- | sudo apt-key add -
-    $APTGET update
-    $APTGET install $pkgname
-    return
-}
-
-    if [ "$cur_kernel_ver" != "$kernel_ver" ];then
-        echo "Can't install virtualbox, $kernel_ver != $cur_kernel_ver"
-        return 0
-    fi
-
-    local moddir=/lib/modules/$(uname -r)
-    if [ -e $moddir/misc/vboxdrv.ko -o -e $moddir/updates/dkms/vboxdrv.ko ];then
-        return 0
-    fi
-
-    local vbox_ver=5.0.10
-    local vbox_dir=/work/cache/download/VirtualBox-$vbox_ver
-
-    if [ -d "$vbox_dir" ];then
-        if [ "$zm_arch" = "amd64" ];then
-            $SUDO sh $vbox_dir/VirtualBox-$vbox_ver-*-Linux_amd64.run
-        else
-            $SUDO sh $vbox_dir/VirtualBox-$vbox_ver-*-Linux_x86.run
-        fi
-        $SUDO VBoxManage extpack install $vbox_dir/Oracle_VM_VirtualBox_Extension_Pack-$vbox_ver.vbox-extpack || true
-    fi
-}
-
 zm_setup()
 {
     need_root
@@ -535,6 +456,7 @@ zm_setup()
     echo "blacklist nouveau" | $SUDO tee /etc/modprobe.d/nouveau-blacklist.conf
 
     zm_setup_default_locales
+    zm_setup_user
 
     zm_setup_sh bash
     zm_setup_tzdata 'Asia' 'Hong_Kong'
@@ -542,10 +464,7 @@ zm_setup()
     _setup_service
     _setup_host
     _setup_network
-    _setup_google_chrome
-    _setup_virtualbox
     _setup_docker
-    _setup_user
     _setup_samba
     _setup_font
 }
