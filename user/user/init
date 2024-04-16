@@ -1,0 +1,76 @@
+#!/bin/sh
+
+~/bin/_randr.sh
+
+sleep 1
+
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS="@im=fcitx"
+
+xset b off
+xset r rate 220 95
+
+synclient VertTwoFingerScroll=1 \
+    HorizTwoFingerScroll=1 \
+    TapButton1=1 \
+    TapButton2=3
+
+# which compton && compton -b
+
+im-launch fcitx
+
+#auto x-terminal-emulator
+terminal_name_1="zm_terminal_desktop_1"
+terminal_name_2="zm_terminal_desktop_2"
+terminal_name_3="zm_terminal_desktop_3"
+terminal_name_4="zm_terminal_desktop_4"
+zm_terminal=terminator
+$zm_terminal -l zm --working-directory /work --classname $terminal_name_1 &
+$zm_terminal -l zm --working-directory /work --classname $terminal_name_2 &
+$zm_terminal -l zm --working-directory /work --classname $terminal_name_3 &
+$zm_terminal -l zm --working-directory /work --classname $terminal_name_4 &
+# $zm_terminal --name $terminal_name_1 &
+# $zm_terminal --name $terminal_name_2 &
+# $zm_terminal --name $terminal_name_3 &
+# $zm_terminal --name $terminal_name_4 &
+
+# lxpanel &
+# pcmanfm --no-desktop --desktop-off -d &
+
+sleep 3
+if which google-chrome > /dev/null 2>&1;then
+    google-chrome &
+elif which chromium > /dev/null 2>&1;then
+    chromium &
+elif which firefox > /dev/null 2>&1;then
+    firefox &
+fi
+
+# sleep 2
+# google-chrome --app="http://web.qq.com" &
+# google-chrome --app=https://mail.google.com &
+# google-chrome --app="http://mail.icivision.com/mail" &
+# google-chrome --app="https://i.doit.im/home#/time/today" &
+# google-chrome --app="https://www.google.com/calendar/render?tab=mc" &
+
+# /usr/bin/icedove &
+
+# pcmanfm --desktop -d &
+
+# xfce4-panel &
+# thunar --daemon &
+
+# stardict --hide &
+# clipit &
+
+
+# fcitx-autostart &
+# nm-applet &
+
+# [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && eval `dbus-launch --sh-syntax --exit-with-session`
+# kill ${DBUS_SESSION_BUS_PID}
+
+#/usr/bin/workrave &
+#/usr/lib/virtualbox/VirtualBox --comment "xp" --fullscreen --startvm "8ac20bb5-f74e-455b-8771-a972fb587ec4" &
+# ~/bin/randrom_wallpaper.sh &
