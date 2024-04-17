@@ -309,10 +309,9 @@ _add_softs_gui()
     # add_soft synaptic
 
     # add_soft lightdm 
-    # add_soft lxde 
-    add_soft lxdm
-    add_soft lxsession #lxpolkit 
-    add_soft lxpanel lxtask lxappearance clipit
+    add_soft lxdm lxde
+    add_soft lxsession lxpolkit
+    add_soft lxpanel lxtask lxappearance
     add_soft arandr lxrandr
     add_soft oxygencursors
     add_soft gtk2-engines gtk2-engines-murrine
