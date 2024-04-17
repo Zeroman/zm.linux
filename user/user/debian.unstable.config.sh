@@ -411,27 +411,6 @@ ___zm_setup_apt()
     $APTGET update
 }
 
-_setup_user()
-{
-    if ! grep 8888 /etc/group > /dev/null;then
-        groupadd -g 8888 $zm_user 
-        useradd -m -s /bin/bash -u 8888 -g 8888 $zm_user
-        # useradd -m -s /bin/zsh -u 8888 -g 8888 $zm_user
-        echo $zm_user:'afj;' | chpasswd
-        echo root:'afj;' | chpasswd
-        zm_add_groups floppy disk dialout audio video plugdev netdev sudo kvm docker vboxusers bumblebee
-        echo "
-        $zm_user    ALL=NOPASSWD: /bin/mount
-        $zm_user    ALL=NOPASSWD: /bin/umount
-        " > /dev/null
-        # " > /etc/sudoers.d/$zm_user.mount
-    fi
-    if [ -e /work ];then
-        chown $zm_user:$zm_user /work #-R    
-        chown $zm_user:$zm_user $(cat /etc/passwd | grep $zm_user | awk -F: '{print $6}') #-R
-    fi
-}
-
 _setup_docker()
 {
     $SUDO sed -i 's@#DOCKER_OPTS=.*@DOCKER_OPTS="--graph=/work/docker/data"@g' /etc/default/docker

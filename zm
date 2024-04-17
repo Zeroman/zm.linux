@@ -2644,24 +2644,30 @@ run_with_qemu()
 {
     base_sets="-enable-kvm -rtc base=localtime -cpu host -m 4G -nodefaults"
     system_sets="-initrd $zm_dir/initrd.img -kernel $zm_dir/vmlinuz"
-    kernel_append="console=ttyS0 debug"
-    #vnc_sets="-vnc :5900 -vga std"
-    vnc_sets=""
-    if [ -n "$vnc_sets" ];then
-        echo "vncviewer 127.0.0.1:5900"
+    vnc_sets="-vga std"
+    serial_sets='' # -serial pty
+    kernel_append="console=ttyS0"
+
+    if $zm_debug;then
+        kernel_append+=" debug"
+        vnc_sets="-nographic"
+        serial_sets="-serial mon:stdio"
     fi
+
     if [ -e $zm_dir/root.sfs ];then
-        system_sets+=" -hda $zm_dir/root.sfs"
+        # system_sets+=" -hda $zm_dir/root.sfs"
+        system_sets+=" -drive file=$zm_dir/root.sfs,if=ide,format=raw"
         kernel_append+=" root_sfs_part=/dev/sda"
     fi
     if [ -e $zm_dir/home.sfs ];then
-        system_sets+=" -hdb $zm_dir/home.sfs"
+        # system_sets+=" -hdb $zm_dir/home.sfs"
+        system_sets+=" -drive file=$zm_dir/home.sfs,if=ide,format=raw"
         kernel_append+=" home_sfs_part=/dev/sdb"
     fi
     if [ -e $zm_dir/work.qcow2 ];then
-        system_sets+=" -hdc $zm_dir/work.qcow2"
+        # system_sets+=" -hdc $zm_dir/work.qcow2"
+        system_sets+=" -drive file=$zm_dir/work.qcow2,if=ide,format=qcow2"
     fi
-    serial_sets='-nographic -serial mon:stdio' # -serial pty
     qemu-system-x86_64 $base_sets $system_sets $vnc_sets $serial_sets -append "$kernel_append"
 }
 
