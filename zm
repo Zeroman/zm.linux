@@ -1744,7 +1744,7 @@ install_to_nvme()
 
     install_system $nvme_root_device 
     install_grub disk=$nvme_device:efi=$nvme_efi_device:root=$nvme_root_device
-    zm_grub_dev=$nvme_efi_device 
+    zm_grub_dev=$nvme_root_device
     zm_sfsroot_dev=$nvme_root_device
     update_grub_config 
 }
