@@ -33,3 +33,13 @@ efibootmgr -b 0001 -B
 efibootmgr -c -w -L "HDD GRUB" -d /dev/sda -p 2 -l \\EFI\\GRUB\\bootx64.efi
 #修改boot 顺序
 efibootmgr -o 0012,0010,0011,000F,000D,000C,000B
+
+
+分区调整
+umount /dev/mapper/zm-work 
+e2fsck -fy  /dev/mapper/zm-work 
+lvreduce -L -50G /dev/mapper/zm-work 
+resize2fs /dev/mapper/zm-work 
+pvresize  --setphysicalvolumesize 864.56G /dev/nvme0n1p3
+resize2fs /dev/mapper/zm-work 
+
